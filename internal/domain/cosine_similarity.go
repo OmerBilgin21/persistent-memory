@@ -19,7 +19,7 @@ func calculateLength(vector []float32) float32 {
 
 func CosineSimilarity(vectorOne, vectorTwo []float32) (float32, error) {
 	if len(vectorOne) != len(vectorTwo) {
-		return 0, fmt.Errorf("i just do not know what to do in this case")
+		return 0, fmt.Errorf("unequal lengths between vectors")
 	}
 
 	var numerator float32

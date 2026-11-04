@@ -27,7 +27,6 @@ type llamaEmbeddingResult struct {
 }
 
 func TestCosineSimilarity(test *testing.T) {
-
 	testCases := []struct {
 		name           string
 		vectorOne      []float32
