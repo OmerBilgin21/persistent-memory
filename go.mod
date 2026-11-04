@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	github.com/glebarez/sqlite v1.11.0
+	github.com/townsendmerino/aikit v1.76.0
 	gorm.io/gorm v1.31.2
 )
 
