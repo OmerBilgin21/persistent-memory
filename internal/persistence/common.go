@@ -2,9 +2,30 @@ package persistence
 
 import (
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 )
+
+type PersSimilarityItem interface {
+	persSimilarityItem()
+	GetNormalizedVector() []float32
+}
+
+func (t Topic) persSimilarityItem()  {}
+func (m Memory) persSimilarityItem() {}
+func (t Topic) GetNormalizedVector() []float32 {
+	return t.NormalizedVector
+}
+func (m Memory) GetNormalizedVector() []float32 {
+	return m.NormalizedVector
+}
+
+type BaseModel struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	CreatedAt time.Time `gorm:"not null;autoCreateTime" json:"createdAt"`
+	UpdatedAt time.Time `gorm:"not null;autoUpdateTime" json:"updatedAt"`
+}
 
 type baseRepository[t any] struct {
 	db *gorm.DB
