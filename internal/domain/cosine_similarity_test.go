@@ -2,6 +2,7 @@ package domain
 
 import (
 	"os"
+	"persistent-memory/util"
 
 	"encoding/json"
 	"path/filepath"
@@ -52,9 +53,11 @@ func TestCosineSimilarity(test *testing.T) {
 		},
 	}
 
+	embedService, _ := NewEmbedService(util.GetMockEncoder())
+
 	for _, tCase := range testCases {
 		test.Run(tCase.name, func(t *testing.T) {
-			result, err := CosineSimilarity(tCase.vectorOne, tCase.vectorTwo)
+			result, err := embedService.CosineSimilarity(tCase.vectorOne, tCase.vectorTwo)
 			if err != nil {
 				t.Logf("error while calculating cosine similarity %+v", err)
 				t.FailNow()
@@ -88,7 +91,7 @@ func TestCosineSimilarity(test *testing.T) {
 			t.Logf("error while parsing the example data %+v", err)
 		}
 
-		llamaSimResult, err := CosineSimilarity(parsed.Data[0].Embedding, parsed.Data[1].Embedding)
+		llamaSimResult, err := embedService.CosineSimilarity(parsed.Data[0].Embedding, parsed.Data[1].Embedding)
 		if err != nil {
 			t.Logf("could not calculate cosine similarity %+v", err)
 		}
@@ -102,7 +105,7 @@ func TestCosineSimilarity(test *testing.T) {
 	})
 
 	test.Run("unequal vectors", func(t *testing.T) {
-		_, err := CosineSimilarity([]float32{1, 2, 3}, []float32{1, 2, 3, 4})
+		_, err := embedService.CosineSimilarity([]float32{1, 2, 3}, []float32{1, 2, 3, 4})
 
 		if err == nil {
 			t.Logf("somehow no error while calculating the cosine similarity of vectors of unequal length")
