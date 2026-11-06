@@ -36,6 +36,21 @@ func NewMemService(memoriesRepository *persistence.MemoriesRepository, topicsRep
 		similarityAcceptedCountThreshold: acceptedCountThreshold,
 	}, nil
 }
+
+func (s *MemService) GetTopicByName(ctx context.Context, name string) (*SimilarityTopic, error) {
+	topic, err := s.topicsRepo.GetByName(ctx, name)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &SimilarityTopic{
+		Description: topic.Description,
+		Id:          topic.ID,
+		Name:        topic.Name,
+	}, nil
+}
+
 func (s *MemService) CreateTopic(ctx context.Context, topic CreateTopic) error {
 	topicVector, err := s.embedService.Embed(topic.Name + " " + topic.Description)
 	if err != nil {
