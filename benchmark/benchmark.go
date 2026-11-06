@@ -43,6 +43,11 @@ func main() {
 	}
 	defer model.Close()
 
+	embedService, err := domain.NewEmbedService(model)
+	if err != nil {
+		panic(err)
+	}
+
 	results := map[string]float32{}
 	for _, refres := range parsed {
 		gores, err := model.Encode(refres.Text)
@@ -51,7 +56,7 @@ func main() {
 			panic(err)
 		}
 
-		simres, err := domain.CosineSimilarity(gores, refres.Vec)
+		simres, err := embedService.CosineSimilarity(gores, refres.Vec)
 		if err != nil {
 			panic(err)
 		}
