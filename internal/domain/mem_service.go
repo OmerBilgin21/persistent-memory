@@ -8,6 +8,35 @@ import (
 
 	"golang.org/x/sync/errgroup"
 )
+
+type SimilarityItem interface {
+	similarityItem()
+	GetRank() *float32
+}
+
+func (s SimilarityTopic) similarityItem() {}
+func (s SimilarityTopic) GetRank() *float32 {
+	return s.Rank
+}
+func (m SimilarityMemory) similarityItem() {}
+func (m SimilarityMemory) GetRank() *float32 {
+	return m.Rank
+}
+
+type SimilarityTopic struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Id          uint   `json:"id"`
+	Rank        *float32
+}
+
+type SimilarityMemory struct {
+	TopicId uint   `json:"topic_id"`
+	Content string `json:"content"`
+	Id      uint   `json:"id"`
+	Rank    *float32
+}
+
 type CreateMemory struct {
 	Content string `json:"content"`
 	TopicId uint   `json:"topic_id"`
@@ -90,5 +119,32 @@ func (s *MemService) CreateMemory(ctx context.Context, fact CreateMemory) error 
 	}
 
 	return nil
+}
+
+func (s *MemService) GetAllResources(ctx context.Context) ([]persistence.Topic, []persistence.Memory, error) {
+	g, subCtx := errgroup.WithContext(ctx)
+
+	var memories []persistence.Memory
+	g.Go(func() error {
+		res, err := s.memoriesRepo.GetAll(subCtx)
+		if err != nil {
+			return err
+		}
+		memories = *res
+		return nil
+	})
+
+	var topics []persistence.Topic
+	g.Go(func() error {
+		res, err := s.topicsRepo.GetAll(subCtx)
+		if err != nil {
+			return err
+		}
+		topics = *res
+		return nil
+	})
+	err := g.Wait()
+
+	return topics, memories, err
 }
 
