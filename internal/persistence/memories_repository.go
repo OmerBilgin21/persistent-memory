@@ -87,6 +87,50 @@ func conditionBuilderForBM25(searchQuery string) (*string, error) {
 	return &safeAndQuoted, nil
 }
 
+func (r *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery string) (*[]Memory, error) {
+	brother, err := conditionBuilderForBM25(searchQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	// The reason I use the ORDER BY rank here is explained here:
+	// https://www.sqlite.org/fts5.html#sorting_by_auxiliary_function_results
+
+	/*
+		direct quote:
+		All FTS5 tables feature a special hidden column named "rank".
+		If the current query is not a full-text query (i.e. if it does not include a MATCH operator), the value of the "rank" column is always NULL.
+		Otherwise, in a full-text query, column rank contains by default the same value as would be returned by executing the bm25() auxiliary function with no trailing arguments.
+
+		The difference between reading from the rank column and using the bm25() function directly within the query is only significant when sorting by the returned value.
+		In this case, using "rank" is faster than using bm25().
+		```sql
+		-- The following queries are logically equivalent. But the second may
+		-- be faster, particularly if the caller abandons the query before
+		-- all rows have been returned (or if the queries were modified to
+		-- include LIMIT clauses).
+		SELECT * FROM ft WHERE ft MATCH ? ORDER BY bm25(ft);
+		SELECT * FROM ft WHERE ft MATCH ? ORDER BY rank;
+		```
+	*/
+
+	var results []Memory
+
+	err = r.db.WithContext(ctx).Raw(`
+		SELECT m.*
+		FROM memories_fts f
+		JOIN memories m ON m.rowid = f.rowid
+		WHERE f MATCH ?
+		ORDER BY rank;
+		`, *brother).Find(&results).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &results, nil
+}
+
 // TODO: test this, it may be that I have to add .Model(&Memory{})
 // every gorm doc does so, but my experience with the generics API hasn't forced me to
 // so just test it
