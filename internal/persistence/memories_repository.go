@@ -2,6 +2,8 @@ package persistence
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -32,6 +34,57 @@ func NewMemoriesRepository(db *gorm.DB) *MemoriesRepository {
 	return &MemoriesRepository{
 		baseRepository: newBaseRepository[Memory](db),
 	}
+}
+
+func recursiveGetRidOfTwoSpaces(str string) string {
+	str = strings.ReplaceAll(str, "  ", " ")
+	if strings.Contains(str, "  ") {
+		str = recursiveGetRidOfTwoSpaces(str)
+	}
+
+	return str
+}
+
+func normalizeStr(searchQuery string) string {
+	searchQuery = strings.ReplaceAll(searchQuery, "\t", " ")
+	searchQuery = strings.ReplaceAll(searchQuery, "\n", " ")
+	searchQuery = strings.ReplaceAll(searchQuery, "\"", " ")
+	searchQuery = recursiveGetRidOfTwoSpaces(searchQuery)
+	return searchQuery
+}
+
+func conditionBuilderForBM25(searchQuery string) (*string, error) {
+	searchQuery = normalizeStr(searchQuery)
+
+	if searchQuery == "" || searchQuery == " " {
+		return nil, fmt.Errorf("empty string search is not possible")
+	}
+
+	splitQuery := strings.Split(searchQuery, " ")
+
+	safeAndQuoted := ""
+
+	// my brain can not comprehend how I'd do this with join
+	// so I'll just do it manually
+	for i, kw := range splitQuery {
+		if kw == "" {
+			safeAndQuoted, _ = strings.CutSuffix(safeAndQuoted, "OR")
+			continue
+		}
+
+		// fair game
+		safeAndQuoted += `"` + kw + `"`
+
+		// last word don't append anything
+		if i == len(splitQuery)-1 {
+			// yea, I don't panic break, I continue, I'm fancy like that
+			continue
+		}
+		safeAndQuoted += "OR"
+
+	}
+
+	return &safeAndQuoted, nil
 }
 
 // TODO: test this, it may be that I have to add .Model(&Memory{})
