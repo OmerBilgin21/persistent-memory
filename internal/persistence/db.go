@@ -27,23 +27,28 @@ CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE OF content ON memories BEG
 END;
 `
 
-func migrate(db *gorm.DB) {
+func migrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(&Memory{}, &Topic{}); err != nil {
-		panic(err)
+		return err
 	}
 	if err := db.Exec(ftsSchema).Error; err != nil {
-		panic(err)
+		return err
 	}
+
+	return nil
 }
 
-func DB() *gorm.DB {
-	db, err := gorm.Open(sqlite.Open("file:mem.db?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"), &gorm.Config{})
+func DB() (*gorm.DB, error) {
+	db, err := gorm.Open(sqlite.Open("file:mem.db?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_txlock=immediate"), &gorm.Config{})
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	migrate(db)
+	err = migrate(db)
+	if err != nil {
+		return nil, err
+	}
 
-	return db
+	return db, nil
 }
