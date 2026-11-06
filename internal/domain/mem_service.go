@@ -161,3 +161,61 @@ func (s *MemService) MergeResources(memories []persistence.Memory, topics []pers
 	return items
 }
 
+func (s *MemService) MeaningSearch(ctx context.Context, fact string) []SimilarityItem {
+	encodedFact, err := s.embedService.Embed(fact)
+	if err != nil {
+		return nil
+	}
+
+	topics, memories, err := s.GetAllResources(ctx)
+	if err != nil {
+		return nil
+	}
+
+	items := s.MergeResources(memories, topics)
+
+	results := make([]SimilarityItem, 0, len(items))
+	normalizedEncodedFact := s.embedService.Normalize(*encodedFact)
+
+	for _, item := range items {
+		sim, err := s.embedService.NormalizedCosineSimilarity(normalizedEncodedFact, item.GetNormalizedVector())
+		if err != nil {
+			continue
+		}
+		if sim >= s.similarityAcceptanceThreshold {
+			switch v := item.(type) {
+			case persistence.Memory:
+				results = append(results, SimilarityMemory{
+					TopicId: v.TopicId,
+					Content: v.Content,
+					Id:      v.ID,
+					Rank:    util.Ptr(sim),
+				})
+			case persistence.Topic:
+				results = append(results, SimilarityTopic{
+					Id:          v.ID,
+					Name:        v.Name,
+					Description: v.Description,
+					Rank:        util.Ptr(sim),
+				})
+			}
+		}
+	}
+
+	slices.SortStableFunc(results, func(a, b SimilarityItem) int {
+		if a.GetRank() == nil || b.GetRank() == nil {
+			return 0
+		}
+
+		if *a.GetRank() < *b.GetRank() {
+			return 1
+		}
+		if *a.GetRank() > *b.GetRank() {
+			return -1
+		}
+
+		return 0
+	})
+
+	return results[:min(s.similarityAcceptedCountThreshold, len(results))]
+}
