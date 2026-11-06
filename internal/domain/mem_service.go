@@ -8,6 +8,16 @@ import (
 
 	"golang.org/x/sync/errgroup"
 )
+type CreateMemory struct {
+	Content string `json:"content"`
+	TopicId uint   `json:"topic_id"`
+}
+
+type CreateTopic struct {
+	Name        string
+	Description string
+}
+
 type MemService struct {
 	embedService                     EmbedServiceInterface
 	memoriesRepo                     persistence.MemoriesRepositoryInterface
@@ -26,3 +36,44 @@ func NewMemService(memoriesRepository *persistence.MemoriesRepository, topicsRep
 		similarityAcceptedCountThreshold: acceptedCountThreshold,
 	}, nil
 }
+func (s *MemService) CreateTopic(ctx context.Context, topic CreateTopic) error {
+	topicVector, err := s.embedService.Embed(topic.Name + " " + topic.Description)
+	if err != nil {
+		return err
+	}
+
+	newTopic := persistence.Topic{
+		Name:             topic.Name,
+		Description:      topic.Description,
+		NormalizedVector: *topicVector,
+	}
+
+	err = s.topicsRepo.Create(ctx, &newTopic)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// TODO: update to upsert
+func (s *MemService) CreateMemory(ctx context.Context, fact CreateMemory) error {
+	factVector, err := s.embedService.Embed(fact.Content)
+	if err != nil {
+		return err
+	}
+
+	factMemory := persistence.Memory{
+		Content:          fact.Content,
+		TopicId:          fact.TopicId,
+		NormalizedVector: *factVector,
+	}
+
+	err = s.memoriesRepo.Create(ctx, &factMemory)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
