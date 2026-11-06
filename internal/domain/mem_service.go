@@ -148,3 +148,16 @@ func (s *MemService) GetAllResources(ctx context.Context) ([]persistence.Topic, 
 	return topics, memories, err
 }
 
+func (s *MemService) MergeResources(memories []persistence.Memory, topics []persistence.Topic) []persistence.PersSimilarityItem {
+	items := make([]persistence.PersSimilarityItem, 0, len(memories)+len(topics))
+
+	for _, m := range memories {
+		items = append(items, m)
+	}
+	for _, t := range topics {
+		items = append(items, t)
+	}
+
+	return items
+}
+
