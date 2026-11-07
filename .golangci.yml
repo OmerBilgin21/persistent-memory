@@ -1,0 +1,15 @@
+version: "2"
+linters:
+  enable:
+    - copyloopvar
+    - cyclop
+    - godox
+    - errcheck
+    - govet
+    - ineffassign
+    - unused
+    - staticcheck
+    - lll
+run:
+  concurrency: 28
+  allow-parallel-runners: true

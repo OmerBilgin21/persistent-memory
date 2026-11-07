@@ -2,7 +2,7 @@ build:
 	CGO_ENABLED=0 go build -o mem ./main.go
 
 lint:
-	@golangci-lint --enable gofmt --enable goimports --enable whitespace --enable copyloopvar run ./...
+	@golangci-lint run
 
 tidy:
 	@goimports -w .
