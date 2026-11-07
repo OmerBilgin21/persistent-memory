@@ -2,9 +2,7 @@ package persistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"persistent-memory/util"
 	"strings"
 	"time"
 
@@ -90,7 +88,7 @@ func conditionBuilderForBM25(searchQuery string) (*string, error) {
 	return &safeAndQuoted, nil
 }
 
-func (_ *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery string) (*[]Memory, error) {
+func (r *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery string) (*[]Memory, error) {
 	brother, err := conditionBuilderForBM25(searchQuery)
 	if err != nil {
 		return nil, err
@@ -117,42 +115,27 @@ func (_ *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery s
 		```
 	*/
 
+	/*
+		Lessons learned:
+		- Semicolon at the end of a query for Raw just breaks the sqlite driver(s)
+		And they throw an ambiguous error.
+		Saying that this was a misuse not an error.
+		- Aliasing the tables for a MATCH ? query just straight up doesn't work
+		Neither on the C drivers nor on the pure Go ones.
+	*/
+
 	var results []Memory
 
-	sqldb, err := sql.Open("sqlite", "file:mem.db?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_txlock=immediate")
-
-	if err != nil {
-		return nil, err
-	}
-	defer sqldb.Close()
-
-	// SELECT * FROM ft WHERE ft MATCH ? ORDER BY rank;
-	rowsplain, err := sqldb.Query(`
+	err = r.db.WithContext(ctx).Raw(`
 		SELECT memories.* 
 		FROM memories_fts 
 		JOIN memories ON memories.id = memories_fts.rowid
 		WHERE memories_fts MATCH ? ORDER BY rank
-		`, *brother)
+		`, *brother).Find(&results).Error
 
 	if err != nil {
 		return nil, err
 	}
-
-	defer rowsplain.Close()
-
-	for rowsplain.Next() {
-		var m Memory
-		if err := rowsplain.Scan(&m.Id, &m.CreatedAt, &m.UpdatedAt, &m.TopicId, &m.Content, &m.LastRetrievedAt, &m.HitCount, &m.NormalizedVector); err != nil {
-			return nil, err
-		}
-		results = append(results, m)
-	}
-
-	if err := rowsplain.Err(); err != nil {
-		return nil, err
-	}
-
-	util.Logger("results: ", results)
 
 	return &results, nil
 }
