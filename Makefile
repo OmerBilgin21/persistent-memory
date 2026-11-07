@@ -1,11 +1,14 @@
 build:
 	CGO_ENABLED=0 go build -o mem ./main.go
 
+format:
+	@golangci-lint fmt
+
 lint:
+	@golangci-lint fmt
 	@golangci-lint run
 
 tidy:
-	@goimports -w .
 	go mod tidy
 
 test:
