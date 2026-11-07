@@ -3,9 +3,9 @@ module persistent-memory
 go 1.27.3
 
 require (
+	github.com/davecgh/go-spew v1.1.1
 	github.com/glebarez/sqlite v1.11.0
 	github.com/townsendmerino/aikit v1.76.0
-	golang.org/x/sync v0.24.0
 	gorm.io/gorm v1.31.2
 )
 
