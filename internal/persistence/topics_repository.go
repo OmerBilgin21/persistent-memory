@@ -28,12 +28,26 @@ type TopicsRepositoryInterface interface {
 	GetAll(ctx context.Context) (*[]Topic, error)
 	GetByName(ctx context.Context, name string) (*Topic, error)
 	UpdateHitCountAndLRA(ctx context.Context, ids []uint) error
+	GetByIds(ctx context.Context, ids []uint) (*[]Topic, error)
 }
 
 func NewTopicsRepository(db *gorm.DB) *TopicsRepository {
 	return &TopicsRepository{
 		baseRepository: newBaseRepository[Topic](db),
 	}
+}
+
+func (r *TopicsRepository) GetByIds(ctx context.Context, ids []uint) (*[]Topic, error) {
+	var result []Topic
+	err := r.db.WithContext(ctx).Find(&result, map[string]any{
+		"id": ids,
+	}).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
 }
 
 func (r *TopicsRepository) GetByName(ctx context.Context, name string) (*Topic, error) {
