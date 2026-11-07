@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"crypto/rand"
 	"os"
 	"persistent-memory/internal/domain"
 	"persistent-memory/internal/persistence"
+	"persistent-memory/util"
 	"time"
 
 	"github.com/townsendmerino/aikit/encoder"
@@ -31,13 +32,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	res, err := embedService.CosineSimilarity([]float32{1, 0}, []float32{0, 1})
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("res: %+v\n", res)
 
-	memService, err := domain.NewMemService(persistence.NewMemoriesRepository(db), persistence.NewTopicsRepository(db), embedService, 0.1, 5)
+	memService, err := domain.NewMemService(persistence.NewMemoriesRepository(db), persistence.NewTopicsRepository(db), embedService, 5)
 	if err != nil {
 		panic(err)
 	}
@@ -45,30 +41,35 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	topicTitle := "yo completely unrelated topic title"
+	if err != nil {
+		panic(err)
+	}
+
+	insertNow := time.Now()
+	topicTitle := rand.Text()
 	err = memService.CreateTopic(ctx, domain.CreateTopic{
-		Description: "yo completely unrelated topic desc",
+		Description: rand.Text(),
 		Name:        topicTitle,
 	})
-
-	if err != nil {
-		panic(err)
-	}
-
 	topic, err := memService.GetTopicByName(ctx, topicTitle)
-
 	if err != nil {
 		panic(err)
 	}
+	for i := 0; i < 100; i++ {
+		err = memService.CreateMemory(ctx, domain.CreateMemory{
+			TopicId: topic.Id,
+			Content: "butterflies " + rand.Text(),
+		})
 
-	err = memService.CreateMemory(ctx, domain.CreateMemory{
-		TopicId: topic.Id,
-		Content: "butterflies are likeable",
-	})
-	if err != nil {
-		panic(err)
+		if err != nil {
+			panic(err)
+		}
 	}
+	util.Logger("elapsed time for inserts: \n", time.Since(insertNow))
 
-	searchResult := memService.MeaningSearch(ctx, "I like butterflies")
-	fmt.Printf("searchResult: %+v\n", searchResult)
+	now := time.Now()
+	searchResult := memService.Search(ctx, "butterflies SAJDKSDJ")
+
+	util.Logger("searchResult error: ", searchResult)
+	util.Logger("elapsed time for search: \n", time.Since(now))
 }
