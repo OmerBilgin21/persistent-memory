@@ -96,8 +96,7 @@ func TestCosineSimilarity(test *testing.T) {
 			t.Logf("could not calculate cosine similarity %+v", err)
 		}
 
-		var expectedRes float32
-		expectedRes = 0.7749478
+		expectedRes := float32(0.7749478)
 		if llamaSimResult != expectedRes {
 			t.Logf("incorrect result! expected %+v, got: %+v", expectedRes, llamaSimResult)
 			t.FailNow()

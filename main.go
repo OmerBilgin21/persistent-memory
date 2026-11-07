@@ -33,7 +33,8 @@ func main() {
 		panic(err)
 	}
 
-	memService, err := domain.NewMemService(persistence.NewMemoriesRepository(db), persistence.NewTopicsRepository(db), embedService, 5)
+	memService, err := domain.NewMemService(persistence.NewMemoriesRepository(db),
+		persistence.NewTopicsRepository(db), embedService, 5)
 	if err != nil {
 		panic(err)
 	}
@@ -51,6 +52,9 @@ func main() {
 		Description: rand.Text(),
 		Name:        topicTitle,
 	})
+	if err != nil {
+		panic(err)
+	}
 	topic, err := memService.GetTopicByName(ctx, topicTitle)
 	if err != nil {
 		panic(err)

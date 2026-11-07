@@ -100,10 +100,16 @@ func (r *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery s
 	/*
 		direct quote:
 		All FTS5 tables feature a special hidden column named "rank".
-		If the current query is not a full-text query (i.e. if it does not include a MATCH operator), the value of the "rank" column is always NULL.
-		Otherwise, in a full-text query, column rank contains by default the same value as would be returned by executing the bm25() auxiliary function with no trailing arguments.
+		If the current query is not a full-text query
+		(i.e. if it does not include a MATCH operator)
+		the value of the "rank" column is always NULL.
+		Otherwise, in a full-text query, column rank contains by default
+		the same value as would be returned by executing
+		the bm25() auxiliary function with no trailing arguments.
 
-		The difference between reading from the rank column and using the bm25() function directly within the query is only significant when sorting by the returned value.
+		The difference between reading from the rank column and
+		using the bm25() function directly within the query is only significant
+		when sorting by the returned value.
 		In this case, using "rank" is faster than using bm25().
 		```sql
 		-- The following queries are logically equivalent. But the second may
