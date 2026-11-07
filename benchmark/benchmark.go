@@ -18,7 +18,6 @@ type benchmarkData struct {
 
 func main() {
 	dir, err := os.Getwd()
-
 	if err != nil {
 		panic(err)
 	}
@@ -26,7 +25,6 @@ func main() {
 	example := filepath.Join(dir, "reference.json")
 	util.Logger("example: ", example)
 	data, err := os.ReadFile(example)
-
 	if err != nil {
 		panic(err)
 	}
@@ -52,7 +50,6 @@ func main() {
 	results := map[string]float32{}
 	for _, refres := range parsed {
 		gores, err := model.Encode(refres.Text)
-
 		if err != nil {
 			panic(err)
 		}

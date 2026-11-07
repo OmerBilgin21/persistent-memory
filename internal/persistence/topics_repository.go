@@ -42,7 +42,6 @@ func (r *TopicsRepository) GetByIds(ctx context.Context, ids []uint) (*[]Topic, 
 	err := r.db.WithContext(ctx).Find(&result, map[string]any{
 		"id": ids,
 	}).Error
-
 	if err != nil {
 		return nil, err
 	}

@@ -1,11 +1,10 @@
 package domain
 
 import (
-	"os"
-	"persistent-memory/util"
-
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"persistent-memory/util"
 	"testing"
 )
 
@@ -45,7 +44,8 @@ func TestCosineSimilarity(test *testing.T) {
 			vectorOne:      []float32{1, 0},
 			vectorTwo:      []float32{0, 1},
 			expectedResult: 0,
-		}, {
+		},
+		{
 			name:           "case 3",
 			vectorOne:      []float32{1, 0},
 			vectorTwo:      []float32{-1, 0},
@@ -72,14 +72,12 @@ func TestCosineSimilarity(test *testing.T) {
 
 	test.Run("the llama one", func(t *testing.T) {
 		dir, err := os.Getwd()
-
 		if err != nil {
 			t.Logf("error while getting the current dir %+v", err)
 		}
 
 		example := filepath.Join(dir, "/cosine_similarity_example.json")
 		data, err := os.ReadFile(example)
-
 		if err != nil {
 			t.Logf("error while reading the example data %+v", err)
 		}
@@ -109,7 +107,5 @@ func TestCosineSimilarity(test *testing.T) {
 		if err == nil {
 			t.Logf("somehow no error while calculating the cosine similarity of vectors of unequal length")
 		}
-
 	})
-
 }

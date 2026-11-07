@@ -42,7 +42,6 @@ func DB() (*gorm.DB, error) {
 	db, err := gorm.Open(sqlite.Open(`file:mem.db?_pragma=busy_timeout(5000)
 		&_pragma=foreign_keys(1)
 		&_pragma=journal_mode(WAL)&_txlock=immediate`), &gorm.Config{})
-
 	if err != nil {
 		return nil, err
 	}

@@ -64,7 +64,6 @@ func main() {
 			TopicId: topic.Id,
 			Content: "butterflies " + rand.Text(),
 		})
-
 		if err != nil {
 			panic(err)
 		}

@@ -89,7 +89,6 @@ func (s *EmbedService) Normalize(vector []float32) []float32 {
 
 func (s *EmbedService) Embed(fact string) (*[]float32, error) {
 	encoded, err := s.loadedEncoder.Encode(fact)
-
 	if err != nil {
 		return nil, err
 	}

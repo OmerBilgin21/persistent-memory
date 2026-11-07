@@ -50,7 +50,8 @@ type MemService struct {
 }
 
 func NewMemService(memoriesRepository *persistence.MemoriesRepository, topicsRepository *persistence.TopicsRepository,
-	embedService *EmbedService, acceptedCountThreshold int) (*MemService, error) {
+	embedService *EmbedService, acceptedCountThreshold int,
+) (*MemService, error) {
 	return &MemService{
 		memoriesRepo:                     memoriesRepository,
 		topicsRepo:                       topicsRepository,
@@ -61,7 +62,6 @@ func NewMemService(memoriesRepository *persistence.MemoriesRepository, topicsRep
 
 func (s *MemService) GetTopicByName(ctx context.Context, name string) (*SimilarityTopic, error) {
 	topic, err := s.topicsRepo.GetByName(ctx, name)
-
 	if err != nil {
 		return nil, err
 	}

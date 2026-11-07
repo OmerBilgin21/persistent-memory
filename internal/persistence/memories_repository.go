@@ -138,7 +138,6 @@ func (r *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery s
 		JOIN memories ON memories.id = memories_fts.rowid
 		WHERE memories_fts MATCH ? ORDER BY rank
 		`, *brother).Find(&results).Error
-
 	if err != nil {
 		return nil, err
 	}

@@ -17,6 +17,7 @@ func (m Memory) persSimilarityItem() {}
 func (t Topic) GetNormalizedVector() []float32 {
 	return t.NormalizedVector
 }
+
 func (m Memory) GetNormalizedVector() []float32 {
 	return m.NormalizedVector
 }
