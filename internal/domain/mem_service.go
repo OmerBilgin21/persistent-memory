@@ -3,38 +3,33 @@ package domain
 import (
 	"context"
 	"persistent-memory/internal/persistence"
-	"persistent-memory/util"
 	"slices"
-
-	"golang.org/x/sync/errgroup"
 )
 
-type SimilarityItem interface {
-	similarityItem()
-	GetRank() *float32
-}
-
-func (s SimilarityTopic) similarityItem() {}
-func (s SimilarityTopic) GetRank() *float32 {
-	return s.Rank
-}
-func (m SimilarityMemory) similarityItem() {}
-func (m SimilarityMemory) GetRank() *float32 {
-	return m.Rank
-}
-
 type SimilarityTopic struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Id          uint   `json:"id"`
-	Rank        *float32
+	Name            string  `json:"name"`
+	Description     string  `json:"description"`
+	Id              uint    `json:"id"`
+	CosineRank      float32 `json:"cosine_rank"`
+	RFFRank         float32 `json:"rff_rank"`
+	DidBM25EffectIt bool    `json:"did_bm_25_effect_it"`
 }
 
 type SimilarityMemory struct {
-	TopicId uint   `json:"topic_id"`
-	Content string `json:"content"`
-	Id      uint   `json:"id"`
-	Rank    *float32
+	TopicId         uint    `json:"topic_id"`
+	Content         string  `json:"content"`
+	Id              uint    `json:"id"`
+	CosineRank      float32 `json:"cosine_rank"`
+	RFFRank         float32 `json:"rff_rank"`
+	DidBM25EffectIt bool    `json:"did_bm_25_effect_it"`
+}
+
+type SimilarityMemoryIndex map[uint]SimilarityMemory
+
+type SimilarityResult struct {
+	Topics   []SimilarityTopic
+	Memories []SimilarityMemory
+	Err      error
 }
 
 type CreateMemory struct {
@@ -51,17 +46,15 @@ type MemService struct {
 	embedService                     EmbedServiceInterface
 	memoriesRepo                     persistence.MemoriesRepositoryInterface
 	topicsRepo                       persistence.TopicsRepositoryInterface
-	similarityAcceptanceThreshold    float32
 	similarityAcceptedCountThreshold int
 }
 
-func NewMemService(memoriesRepository *persistence.MemoriesRepository, topicsRepository *persistence.TopicsRepository, embedService *EmbedService, acceptanceThreshold float32, acceptedCountThreshold int) (*MemService, error) {
-
+func NewMemService(memoriesRepository *persistence.MemoriesRepository, topicsRepository *persistence.TopicsRepository,
+	embedService *EmbedService, acceptedCountThreshold int) (*MemService, error) {
 	return &MemService{
 		memoriesRepo:                     memoriesRepository,
 		topicsRepo:                       topicsRepository,
 		embedService:                     embedService,
-		similarityAcceptanceThreshold:    acceptanceThreshold,
 		similarityAcceptedCountThreshold: acceptedCountThreshold,
 	}, nil
 }
@@ -75,7 +68,7 @@ func (s *MemService) GetTopicByName(ctx context.Context, name string) (*Similari
 
 	return &SimilarityTopic{
 		Description: topic.Description,
-		Id:          topic.ID,
+		Id:          topic.Id,
 		Name:        topic.Name,
 	}, nil
 }
@@ -121,101 +114,131 @@ func (s *MemService) CreateMemory(ctx context.Context, fact CreateMemory) error 
 	return nil
 }
 
-func (s *MemService) GetAllResources(ctx context.Context) ([]persistence.Topic, []persistence.Memory, error) {
-	g, subCtx := errgroup.WithContext(ctx)
-
-	var memories []persistence.Memory
-	g.Go(func() error {
-		res, err := s.memoriesRepo.GetAll(subCtx)
-		if err != nil {
-			return err
-		}
-		memories = *res
-		return nil
-	})
-
-	var topics []persistence.Topic
-	g.Go(func() error {
-		res, err := s.topicsRepo.GetAll(subCtx)
-		if err != nil {
-			return err
-		}
-		topics = *res
-		return nil
-	})
-	err := g.Wait()
-
-	return topics, memories, err
+func getRFFRank(position int) float32 {
+	return float32(float32(1) / (float32(60) + float32(position)))
 }
 
-func (s *MemService) MergeResources(memories []persistence.Memory, topics []persistence.Topic) []persistence.PersSimilarityItem {
-	items := make([]persistence.PersSimilarityItem, 0, len(memories)+len(topics))
-
-	for _, m := range memories {
-		items = append(items, m)
-	}
-	for _, t := range topics {
-		items = append(items, t)
-	}
-
-	return items
-}
-
-func (s *MemService) MeaningSearch(ctx context.Context, fact string) []SimilarityItem {
+func (s *MemService) Search(ctx context.Context, fact string) SimilarityResult {
 	encodedFact, err := s.embedService.Embed(fact)
 	if err != nil {
-		return nil
+		return SimilarityResult{
+			Err: err,
+		}
 	}
 
-	topics, memories, err := s.GetAllResources(ctx)
+	memories, err := s.memoriesRepo.GetAll(ctx)
 	if err != nil {
-		return nil
+		return SimilarityResult{
+			Err: err,
+		}
 	}
 
-	items := s.MergeResources(memories, topics)
-
-	results := make([]SimilarityItem, 0, len(items))
+	cosineSorted := make([]SimilarityMemory, 0, len(*memories))
 	normalizedEncodedFact := s.embedService.Normalize(*encodedFact)
 
-	for _, item := range items {
-		sim, err := s.embedService.NormalizedCosineSimilarity(normalizedEncodedFact, item.GetNormalizedVector())
+	for _, m := range *memories {
+		sim, err := s.embedService.NormalizedCosineSimilarity(normalizedEncodedFact,
+			m.NormalizedVector)
 		if err != nil {
 			continue
 		}
-		if sim >= s.similarityAcceptanceThreshold {
-			switch v := item.(type) {
-			case persistence.Memory:
-				results = append(results, SimilarityMemory{
-					TopicId: v.TopicId,
-					Content: v.Content,
-					Id:      v.ID,
-					Rank:    util.Ptr(sim),
-				})
-			case persistence.Topic:
-				results = append(results, SimilarityTopic{
-					Id:          v.ID,
-					Name:        v.Name,
-					Description: v.Description,
-					Rank:        util.Ptr(sim),
-				})
-			}
-		}
+
+		cosineSorted = append(cosineSorted, SimilarityMemory{
+			TopicId:    m.TopicId,
+			Content:    m.Content,
+			Id:         m.Id,
+			CosineRank: sim,
+		})
 	}
 
-	slices.SortStableFunc(results, func(a, b SimilarityItem) int {
-		if a.GetRank() == nil || b.GetRank() == nil {
-			return 0
-		}
-
-		if *a.GetRank() < *b.GetRank() {
+	slices.SortStableFunc(cosineSorted, func(a, b SimilarityMemory) int {
+		if a.CosineRank < b.CosineRank {
 			return 1
 		}
-		if *a.GetRank() > *b.GetRank() {
+		if a.CosineRank > b.CosineRank {
 			return -1
 		}
 
 		return 0
 	})
 
-	return results[:min(s.similarityAcceptedCountThreshold, len(results))]
+	bm25Sorted, err := s.memoriesRepo.GetAllByBM25Desc(ctx, fact)
+	if err != nil {
+		return SimilarityResult{
+			Err: err,
+		}
+	}
+
+	var bm25Ranked []SimilarityMemory
+
+	for i, m := range *bm25Sorted {
+		bm25Ranked = append(bm25Ranked, SimilarityMemory{
+			TopicId: m.TopicId,
+			Content: m.Content,
+			Id:      m.Id,
+			RFFRank: getRFFRank(i),
+		})
+	}
+
+	for i := range cosineSorted {
+		cosineSorted[i].RFFRank = getRFFRank(i)
+	}
+
+	bm25Index := make(SimilarityMemoryIndex, len(bm25Ranked))
+
+	for _, m := range bm25Ranked {
+		bm25Index[m.Id] = m
+	}
+
+	for i, m := range cosineSorted {
+		bm25Equivalent, ok := bm25Index[m.Id]
+
+		if ok {
+			cosineSorted[i].RFFRank = m.RFFRank + bm25Equivalent.RFFRank
+			cosineSorted[i].DidBM25EffectIt = true
+		} else {
+			cosineSorted[i].RFFRank = m.RFFRank
+			cosineSorted[i].DidBM25EffectIt = false
+		}
+	}
+
+	slices.SortStableFunc(cosineSorted, func(a, b SimilarityMemory) int {
+		if a.RFFRank < b.RFFRank {
+			return 1
+		}
+		if a.RFFRank > b.RFFRank {
+			return -1
+		}
+
+		return 0
+	})
+
+	selectedMemories := cosineSorted[:min(s.similarityAcceptedCountThreshold, len(cosineSorted))]
+
+	var ids []uint
+	for _, m := range selectedMemories {
+		ids = append(ids, m.TopicId)
+	}
+
+	persTopics, err := s.topicsRepo.GetByIds(ctx, ids)
+	if err != nil {
+		return SimilarityResult{
+			Err: err,
+		}
+	}
+
+	var topics []SimilarityTopic
+	for _, t := range *persTopics {
+		topics = append(topics, SimilarityTopic{
+			Name:        t.Name,
+			Description: t.Description,
+			Id:          t.Id,
+		})
+	}
+
+	return SimilarityResult{
+		Topics:   topics,
+		Memories: selectedMemories,
+		Err:      nil,
+	}
 }
