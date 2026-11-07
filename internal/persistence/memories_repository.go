@@ -2,7 +2,9 @@ package persistence
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"persistent-memory/util"
 	"strings"
 	"time"
 
@@ -28,6 +30,7 @@ type MemoriesRepositoryInterface interface {
 	Delete(ctx context.Context, id uint) error
 	GetAll(ctx context.Context) (*[]Memory, error)
 	UpdateHitCountAndLRA(ctx context.Context, ids []uint) error
+	GetAllByBM25Desc(ctx context.Context, searchQuery string) (*[]Memory, error)
 }
 
 func NewMemoriesRepository(db *gorm.DB) *MemoriesRepository {
@@ -87,7 +90,7 @@ func conditionBuilderForBM25(searchQuery string) (*string, error) {
 	return &safeAndQuoted, nil
 }
 
-func (r *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery string) (*[]Memory, error) {
+func (_ *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery string) (*[]Memory, error) {
 	brother, err := conditionBuilderForBM25(searchQuery)
 	if err != nil {
 		return nil, err
@@ -116,17 +119,40 @@ func (r *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery s
 
 	var results []Memory
 
-	err = r.db.WithContext(ctx).Raw(`
-		SELECT m.*
-		FROM memories_fts f
-		JOIN memories m ON m.rowid = f.rowid
-		WHERE f MATCH ?
-		ORDER BY rank;
-		`, *brother).Find(&results).Error
+	sqldb, err := sql.Open("sqlite", "file:mem.db?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_txlock=immediate")
 
 	if err != nil {
 		return nil, err
 	}
+	defer sqldb.Close()
+
+	// SELECT * FROM ft WHERE ft MATCH ? ORDER BY rank;
+	rowsplain, err := sqldb.Query(`
+		SELECT memories.* 
+		FROM memories_fts 
+		JOIN memories ON memories.id = memories_fts.rowid
+		WHERE memories_fts MATCH ? ORDER BY rank
+		`, *brother)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rowsplain.Close()
+
+	for rowsplain.Next() {
+		var m Memory
+		if err := rowsplain.Scan(&m.Id, &m.CreatedAt, &m.UpdatedAt, &m.TopicId, &m.Content, &m.LastRetrievedAt, &m.HitCount, &m.NormalizedVector); err != nil {
+			return nil, err
+		}
+		results = append(results, m)
+	}
+
+	if err := rowsplain.Err(); err != nil {
+		return nil, err
+	}
+
+	util.Logger("results: ", results)
 
 	return &results, nil
 }
