@@ -22,7 +22,7 @@ func (m Memory) GetNormalizedVector() []float32 {
 }
 
 type BaseModel struct {
-	ID        uint      `gorm:"primarykey" json:"id"`
+	Id        uint      `gorm:"primarykey" json:"id"`
 	CreatedAt time.Time `gorm:"not null;autoCreateTime" json:"createdAt"`
 	UpdatedAt time.Time `gorm:"not null;autoUpdateTime" json:"updatedAt"`
 }
