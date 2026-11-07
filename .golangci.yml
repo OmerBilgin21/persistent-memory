@@ -3,17 +3,38 @@ linters:
   enable:
     - copyloopvar
     - cyclop
+    - errorlint
+    - gocritic
     - godox
-    - errcheck
-    - govet
-    - ineffassign
-    - unused
-    - staticcheck
     - lll
+    - misspell
+    - nolintlint
+    - unconvert
+    - unparam
+    - usestdlibvars
+  settings:
+    cyclop:
+      max-complexity: 15
+    lll:
+      line-length: 120
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - cyclop
+          - lll
 formatters:
   enable:
-    - gofumpt
     - goimports
+    - gofumpt
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
 run:
-  concurrency: 28
+  concurrency: 29
   allow-parallel-runners: true
