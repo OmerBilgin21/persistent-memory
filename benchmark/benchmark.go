@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"persistent-memory/internal/domain"
+	"persistent-memory/util"
 
 	"github.com/townsendmerino/aikit/encoder"
 )
@@ -23,7 +24,7 @@ func main() {
 	}
 
 	example := filepath.Join(dir, "reference.json")
-	fmt.Printf("path: %+v\n", example)
+	util.Logger("example: ", example)
 	data, err := os.ReadFile(example)
 
 	if err != nil {
