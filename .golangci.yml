@@ -10,6 +10,10 @@ linters:
     - unused
     - staticcheck
     - lll
+formatters:
+  enable:
+    - gofumpt
+    - goimports
 run:
   concurrency: 28
   allow-parallel-runners: true
