@@ -5,7 +5,7 @@ description: Use when asked to review, verify, or check code in this project —
 
 # Plan Review
 
-Read-only review. Never edit, fix, or refactor anything found here — report and ask instead. This project's CLAUDE.md already forbids unrequested code changes; this skill is how review happens without violating that.
+Read-only review. Never edit, fix, or refactor anything found here — report and ask instead. This project's AGENTS.md already forbids unrequested code changes; this skill is how review happens without violating that.
 
 ## 1. Determine scope
 
@@ -44,7 +44,7 @@ Once intent is settled, review the code in scope on its own merits: correctness 
 - no hand-picked thresholds outside usage decay — everything else comes from automatic tuning
 - assumptions that only hold at the stated scale (local SQLite, single user, no index) aren't being quietly broken
 
-Report these findings with the ReportFindings tool, most severe first. Discrepancy-vs-plan questions from step 3 are not findings — by report time they're either resolved, or still-open questions blocking part of the review (say so plainly rather than reviewing around a gap silently).
+Report these findings with the most severe first. Discrepancy-vs-plan questions from step 3 are not findings — by report time they're either resolved, or still-open questions blocking part of the review (say so plainly rather than reviewing around a gap silently).
 
 ## Idiom nitpicks: pin them to this project's Go version
 
