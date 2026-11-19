@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"fmt"
+	"persistent-memory/util"
 	"strings"
 	"time"
 
@@ -11,11 +12,11 @@ import (
 
 type Memory struct {
 	BaseModel
-	TopicId          uint      `gorm:"constraint:OnDelete:CASCADE" json:"topicId"`
+	TopicId          uint      `gorm:"not null" json:"topic_id"`
 	Content          string    `gorm:"not null" json:"content"`
-	LastRetrievedAt  time.Time `gorm:"not null;autoCreateTime" json:"lastRetrievedAt"`
-	HitCount         int       `gorm:"not null;default: 0" json:"hitCount"`
-	NormalizedVector Vector    `gorm:"not null" json:"normalizedVector"`
+	LastRetrievedAt  time.Time `gorm:"not null;autoCreateTime" json:"last_retrieved_at"`
+	HitCount         int       `gorm:"not null;default: 0" json:"hit_count"`
+	NormalizedVector Vector    `gorm:"not null" json:"normalized_vector"`
 }
 
 type MemoriesRepository struct {
@@ -23,12 +24,14 @@ type MemoriesRepository struct {
 }
 
 type MemoriesRepositoryInterface interface {
+	Get(ctx context.Context, id uint) (*Memory, error)
 	Create(ctx context.Context, entity *Memory) error
 	Update(ctx context.Context, entity *Memory) error
 	Delete(ctx context.Context, id uint) error
 	GetAll(ctx context.Context) (*[]Memory, error)
 	UpdateHitCountAndLRA(ctx context.Context, ids []uint) error
 	GetAllByBM25Desc(ctx context.Context, searchQuery string) (*[]Memory, error)
+	ConditionBuilderForBM25(searchQuery string) (*string, error)
 }
 
 func NewMemoriesRepository(db *gorm.DB) *MemoriesRepository {
@@ -37,25 +40,8 @@ func NewMemoriesRepository(db *gorm.DB) *MemoriesRepository {
 	}
 }
 
-func recursiveGetRidOfTwoSpaces(str string) string {
-	str = strings.ReplaceAll(str, "  ", " ")
-	if strings.Contains(str, "  ") {
-		str = recursiveGetRidOfTwoSpaces(str)
-	}
-
-	return str
-}
-
-func normalizeStr(searchQuery string) string {
-	searchQuery = strings.ReplaceAll(searchQuery, "\t", " ")
-	searchQuery = strings.ReplaceAll(searchQuery, "\n", " ")
-	searchQuery = strings.ReplaceAll(searchQuery, "\"", " ")
-	searchQuery = recursiveGetRidOfTwoSpaces(searchQuery)
-	return searchQuery
-}
-
-func conditionBuilderForBM25(searchQuery string) (*string, error) {
-	searchQuery = normalizeStr(searchQuery)
+func (r *MemoriesRepository) ConditionBuilderForBM25(searchQuery string) (*string, error) {
+	searchQuery = util.NormalizeStr(searchQuery)
 
 	if searchQuery == "" || searchQuery == " " {
 		return nil, fmt.Errorf("empty string search is not possible")
@@ -89,7 +75,7 @@ func conditionBuilderForBM25(searchQuery string) (*string, error) {
 }
 
 func (r *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery string) (*[]Memory, error) {
-	brother, err := conditionBuilderForBM25(searchQuery)
+	brother, err := r.ConditionBuilderForBM25(searchQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -145,11 +131,8 @@ func (r *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery s
 	return &results, nil
 }
 
-// TODO: test this, it may be that I have to add .Model(&Memory{})
-// every gorm doc does so, but my experience with the generics API hasn't forced me to
-// so just test it
 func (r *MemoriesRepository) UpdateHitCountAndLRA(ctx context.Context, ids []uint) error {
-	return r.db.WithContext(ctx).Where("id IN ?", ids).Updates(map[string]any{
+	return r.db.WithContext(ctx).Model(&Memory{}).Where("id IN ?", ids).UpdateColumns(map[string]any{
 		"hit_count":         gorm.Expr("hit_count + ?", 1),
 		"last_retrieved_at": time.Now(),
 	}).Error

@@ -118,9 +118,11 @@ func TestConditionBuilderForBM25(t *testing.T) {
 		},
 	}
 
+	repo := NewMemoriesRepository(nil)
+
 	for _, tCase := range testCases {
 		t.Run(tCase.name, func(t *testing.T) {
-			result, err := conditionBuilderForBM25(tCase.searchQuery)
+			result, err := repo.ConditionBuilderForBM25(tCase.searchQuery)
 
 			if tCase.expectError {
 				if err == nil {

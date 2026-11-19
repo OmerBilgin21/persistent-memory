@@ -11,10 +11,10 @@ type Topic struct {
 	BaseModel
 	Description      string    `gorm:"not null" json:"description"`
 	Name             string    `gorm:"uniqueIndex;not null" json:"name"`
-	LastRetrievedAt  time.Time `gorm:"not null;autoCreateTime" json:"lastRetrievedAt"`
-	HitCount         int       `gorm:"not null;default: 0" json:"hitCount"`
-	Memories         []Memory  `gorm:"foreignKey:TopicId" json:"memories"`
-	NormalizedVector Vector    `gorm:"not null" json:"normalizedVector"`
+	LastRetrievedAt  time.Time `gorm:"not null;autoCreateTime" json:"last_retrieved_at"`
+	HitCount         int       `gorm:"not null;default: 0" json:"hit_count"`
+	Memories         []Memory  `gorm:"constraint:OnDelete:CASCADE;foreignKey:TopicId" json:"memories"`
+	NormalizedVector Vector    `gorm:"not null" json:"normalized_vector"`
 }
 
 type TopicsRepository struct {
@@ -22,6 +22,7 @@ type TopicsRepository struct {
 }
 
 type TopicsRepositoryInterface interface {
+	Get(ctx context.Context, id uint) (*Topic, error)
 	Create(ctx context.Context, entity *Topic) error
 	Update(ctx context.Context, entity *Topic) error
 	Delete(ctx context.Context, id uint) error
@@ -29,6 +30,7 @@ type TopicsRepositoryInterface interface {
 	GetByName(ctx context.Context, name string) (*Topic, error)
 	UpdateHitCountAndLRA(ctx context.Context, ids []uint) error
 	GetByIds(ctx context.Context, ids []uint) (*[]Topic, error)
+	GetWithMemories(ctx context.Context, id uint) (*Topic, error)
 }
 
 func NewTopicsRepository(db *gorm.DB) *TopicsRepository {
@@ -51,7 +53,7 @@ func (r *TopicsRepository) GetByIds(ctx context.Context, ids []uint) (*[]Topic, 
 
 func (r *TopicsRepository) GetByName(ctx context.Context, name string) (*Topic, error) {
 	var result Topic
-	err := r.db.WithContext(ctx).Find(&result, map[string]string{
+	err := r.db.WithContext(ctx).First(&result, map[string]string{
 		"name": name,
 	}).Error
 	if err != nil {
@@ -60,12 +62,21 @@ func (r *TopicsRepository) GetByName(ctx context.Context, name string) (*Topic, 
 	return &result, nil
 }
 
-// TODO: test this, it may be that I have to add .Model(&Topic{})
-// every gorm doc does so, but my experience with the generics API hasn't forced me to
-// so just test it
 func (r *TopicsRepository) UpdateHitCountAndLRA(ctx context.Context, ids []uint) error {
-	return r.db.WithContext(ctx).Where("id IN ?", ids).Updates(map[string]any{
+	return r.db.WithContext(ctx).Model(&Topic{}).Where("id IN ?", ids).UpdateColumns(map[string]any{
 		"hit_count":         gorm.Expr("hit_count + ?", 1),
 		"last_retrieved_at": time.Now(),
 	}).Error
+}
+
+func (r *TopicsRepository) GetWithMemories(ctx context.Context, id uint) (*Topic, error) {
+	var found Topic
+	err := r.db.WithContext(ctx).Model(&Topic{}).Preload("Memories").First(&found, map[string]uint{
+		"id": id,
+	}).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &found, nil
 }
