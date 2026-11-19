@@ -1,8 +1,13 @@
 package persistence
 
 import (
+	"log"
+	"os"
+	"time"
+
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 const ftsSchema = `
@@ -41,7 +46,15 @@ func migrate(db *gorm.DB) error {
 func DB() (*gorm.DB, error) {
 	db, err := gorm.Open(sqlite.Open(`file:mem.db?_pragma=busy_timeout(5000)
 		&_pragma=foreign_keys(1)
-		&_pragma=journal_mode(WAL)&_txlock=immediate`), &gorm.Config{})
+		&_pragma=journal_mode(WAL)&_txlock=immediate`), &gorm.Config{
+		TranslateError: true,
+		Logger: logger.New(log.New(os.Stderr, "", log.LstdFlags), logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  false,
+		}),
+	})
 	if err != nil {
 		return nil, err
 	}
