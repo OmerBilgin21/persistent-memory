@@ -7,7 +7,7 @@
 3. Connecting `mem` to specific tools (Claude Code hooks, OpenCode plugins, lines in AGENTS.md) is out of scope. `mem` ships a command line interface and an MCP server. Wiring them up is the user's job.
 4. v1 uses no language model at all. `mem` never calls the harness's or a provider's language model. A language model only appears in v2, built into the binary.
 5. Tuning is never the user's job. Thresholds are set automatically by `mem` from a built-in example set that ob writes and knows to be correct. Usage decay is the exception: ob sets its values by hand.
-6. All memories are written by the agent in the harness (Claude Code or Pi) through `upsert`. `mem` never reads session transcripts. Because of that, the harness must push the agent to save: a Stop hook in Claude Code, and the equivalent in Pi, asks the agent to save decisions and changed facts before it stops. Watch writes per day (from `created_at`): if that number flatlines, the nudge isn't working.
+6. All memories are written by the agent in the harness (Claude Code or Pi) through their respective create tools. `mem` never reads session transcripts. Because of that, the harness must push the agent to save: a Stop hook in Claude Code, and the equivalent in Pi, asks the agent to save decisions and changed facts before it stops. Watch writes per day (from `created_at`): if that number flatlines, the nudge isn't working.
 7. Every removal is a hard delete. Nothing is archived, soft-deleted or kept around.
    1. Obsolescence (a memory no longer being needed) is decided only by the usage decay rules in code: how long since a memory was last needed, and how many times it was needed (section 5, item 7). The built-in model never deletes anything for being obsolete.
    2. Other removals: the agent calling `delete`, and merging (v2, item 4), where the merged fact replaces the originals.
@@ -29,7 +29,7 @@
    1. `topics`: id (integer primary key), name (unique), description, embedding, updated_at, last_retrieved_at, hit_count.
    2. `memories`: id (integer primary key), topic_id (required, foreign key to topics, deleted along with its topic), content (at most 280 characters), embedding, created_at, updated_at, last_retrieved_at, hit_count.
    3. `memories_fts`: SQLite's full-text search index over `memories.content`. It reads the text from the memories table instead of keeping its own copy, and three triggers (insert, update, delete) keep it in sync. Use the `porter unicode61` tokenizer: it splits text into words and reduces English words to their stem, so "running" also matches "run".
-   4. `injected(session_id, topic_id)`: which topics were already shown in a session, so they aren't shown twice.
+   4. `injected(session_id, memory_id)`: which memories were already shown in a session, so they aren't shown twice.
    5. `query_log(query, top_scores, injected_ids, ts)`: every query, its scores, and what got shown. For your own debugging.
    6. `settings(key, value)`: what the program needs to run correctly. That's the embedding model name, the vector size, the checksum of the weights, and every number produced by automatic tuning (section 6).
 4. **Why integer primary keys:** the search index points at rows by row number. With an integer primary key, that number never changes. Without one, VACUUM can renumber rows and silently break the index.
@@ -47,10 +47,7 @@
 5. **Weights checksum:** keep a SHA-256 checksum of the weights so a corrupted file gets caught.
 6. **Model change:** on start, if the model name or weights checksum in `settings` differs from what the binary expects, re-embed every topic and fact, then re-run automatic tuning, before doing anything else. Vectors from two different models can't be compared, so this must never be skipped.
 7. **Scale every vector to length 1 in one place,** right where embeddings come back from aikit, so nothing downstream can forget. aikit probably already does it; this is a cheap safety net. Then cosine similarity is just a dot product.
-8. **A topic's embedding** is computed from its name and description together.
-9. **Startup time:** `mem context` starts a fresh process for every prompt. Measure model loading and one embedding separately. GTE-Small has 12 layers, so expect very roughly 100ms per embedding (aikit reports about 46ms for the 6-layer MiniLM).
-   1. If loading is the slow part: hand the prompt over a Unix socket to the `mem mcp` process, which already runs for the whole session with the model loaded. Fall back to loading the model directly when nothing is listening.
-   2. If a single embedding is slow by itself, a long-running process won't help. Then the choice is a smaller model or accepting it.
+8. **A topic's embedding** is computed from its name.
 
 ### 3. Search and ranking
 
@@ -62,35 +59,81 @@
 
 ### 4. Write rules
 
-1. **Reject facts over 280 characters,** with an error telling the model to shorten.
-2. **Choosing the topic for a new fact:**
-   1. Exact name match.
-   2. Otherwise, compare against each topic's name and description embedding and against its facts, and take the best score.
-   3. Unknown name that is close to existing topics: reject with "did you mean X or Y?"
-   4. Truly new topic: require a description, then create it.
-3. **Duplicate check,** within the topic first, then across all facts:
-   1. Above about 0.95 cosine: same fact. Refresh its timestamps and return the existing id.
-   2. Between 0.85 and 0.95: possibly the same. Reject and return the similar fact's id so the model decides.
-   3. Below 0.85: insert.
-   4. These numbers are only fallbacks. GTE gives fairly high scores even to unrelated text, so automatic tuning (section 6) replaces them.
-4. **Negation check:** "we use Postgres" and "we don't use Postgres" embed almost identically. If one of two near duplicates contains a negation word (not, no, never, don't and so on) and the other doesn't, don't treat them as duplicates.
-5. **Fact cap:** about 30 facts at most per topic. Flag topics that go over it.
+Four tools, two shared checks.
+
+#### Shared checks
+
+1. **Memory check** (skipped when `force` is set).
+   1. Search all memories by raw cosine against the content embedding, top k, no threshold. Exclude the memory itself when updating.
+   2. Every memory at or above the memory threshold (0.85 fallback): reject and return them, each with memory id, content, cosine score, updated_at, topic id, topic name.
+   3. Error message tells the model its options: update one of them with `update_memory`, or resend with `force` if this is a different fact.
+   4. Keep the full top k result for the fit score below.
+
+2. **Topic name check** (skipped when `force` is set).
+   1. Exact name match on another topic: reject with "topic X already exists" and its id. `force` does not skip this one.
+   2. Otherwise compare the name embedding against every other topic's name embedding.
+   3. Topics at or above the topic threshold: reject with "did you mean X or Y?", returning topic id, name, description, memory count. Tell the model to use one of those, or resend with `force`.
+
+3. **Fit score** (logged only in v1, never rejects).
+   1. Group the memory check's top k by topic, scoring each topic by its best memory.
+   2. Log the chosen topic's score next to the best other topic's score.
+   3. Skip when the chosen topic has no memories yet.
+   4. Turn this into a "this looks closer to topic X" rejection only if calibration shows it would catch real mistakes.
+
+#### Tools
+
+1. **`create_topic(name, description, force?)`**
+   1. Reject an empty name.
+   2. Embed the name, outside the transaction.
+   3. Topic name check.
+   4. Insert, return the topic id.
+
+2. **`update_topic(id, name?, description?, force?)`**
+   1. Reject if the topic doesn't exist, or if neither name nor description is given.
+   2. If the name changes: embed it outside the transaction, then run the topic name check.
+   3. Update, return the topic id.
+
+3. **`create_memory(topic_id, content, force?)`**
+   1. Reject empty content, or content over 280 characters, with an error telling the model to shorten it.
+   2. Embed the content, outside the transaction.
+   3. Reject if the topic doesn't exist, returning the top topics from the memory check's grouped result so the model has something to retry with.
+   4. Memory check.
+   5. Insert, log the fit score, return the memory id.
+
+4. **`update_memory(id, content?, topic_id?, force?)`**
+   1. Reject if the memory doesn't exist, or if neither content nor topic_id is given.
+   2. Same content rules as `create_memory`.
+   3. If the content changes: embed it outside the transaction, then run the memory check excluding this memory.
+   4. If the topic changes: reject if the new topic doesn't exist, and log the fit score.
+   5. Update, return the memory id.
+
+#### Every write
+
+1. **One transaction.** Embed before it opens, then run the checks and the write inside one write transaction, so two sessions can't both pass the check and insert the same fact.
+2. **Descriptions are display only.** Shown in `get` and in injection, never embedded, never used for matching.
+3. **Memory cap.** If a topic now has more than about 30 memories, add a warning to the response. Don't reject.
+4. **Decision log from Go.** One row per tool call: tool, outcome (written, rejected by memory check, rejected by topic name check, not found), whether `force` was used, candidates with scores as JSON, fit score. On a rejection, commit the transaction with just the log row instead of rolling back. Database triggers separately keep an audit trail of the actual row changes.
+5. **Thresholds.** Memory threshold and topic threshold are both raw cosine and configurable. The 0.85 fallback gets replaced in section 6. Before building the rest, embed 10 to 15 hand picked pairs (same fact, same domain but different, negations) to check the fallback is anywhere near sane for GTE.
 
 ### 5. Interfaces
 
 1. **`mem mcp`:** MCP server over stdin and stdout, using the official Go SDK. All logs go to stderr, because anything else printed to stdout corrupts the protocol. Tools:
-   1. `upsert(topic, content, id?, topic_description?)`
-   2. `search(query, k?, topic?)`
-   3. `get(id)`: a topic id returns its description and all its facts. A fact id returns that fact.
-   4. `delete(id)`: a fact, or a topic together with all its facts.
-   5. `rename(id, name, description)`: for topics.
-2. **`mem context --session <id>`:** reads the prompt from stdin and prints what to inject as JSON on stdout. The JSON format carries a version number and the exit codes are fixed, so whatever calls it doesn't break when you change things.
-3. **When to inject:** the best match's cosine has to clear a minimum, and it has to be clearly ahead of the second best. Both numbers come from automatic tuning (section 6).
-4. **At most 5 entries.** Each is the topic (id, name, description, fact count) plus its best matching fact. Skip topics already in `injected` for this session.
-5. **Tool descriptions are instructions for the agent:** write self-contained facts ("ob's PC budget is €2000", not "budget is 2000"), search before writing, and how to answer "did you mean".
-6. **`mem export`:** prints every topic and its facts as markdown to stdout, on demand. Read-only, never changes anything. Useful as a readable backup and to diff over time in git.
+   1. `create_topic(name, description, force?)`
+   2. `update_memory(id, content?, topic_id?, force?)`
+   3. `search(query)`
+   4. `get_memory(id)`
+   5. `get_topic(id)`: a topic id returns its description and all its facts. Records every fact it returns in `injected` for the current session, so a topic the agent has read in full isn't injected again. `mem mcp` knows the current session from the latest `inject` call.
+   6. `delete_topic(id)`
+   7. `delete_memory(id)`
+   8. `update_topic(id, name?, description?, force?)`
+   9. `create_memory(topic_id, content, force?)`
+   10. `inject(prompt, session_id)`: called by the harness on every user prompt, never by the agent (its description says so). Searches the prompt, applies items 2 and 3, records what it returns in `injected`, and returns readable text (not JSON), because the harness pastes the result into the context as is.
+   11. `clear_injected(session_id)`: called by the harness after a compaction. Deletes that session's `injected` rows, because compaction can drop earlier injections from the context while the session id stays the same.
+2. **When to inject:** the best match's cosine has to clear a minimum, and it has to be clearly ahead of the second best. Both numbers come from automatic tuning (section 6).
+3. **At most 5 entries.** Each is a matching fact plus its topic (id, name, description, fact count). Several facts from the same topic can each be an entry. Skip facts already in `injected` for this session.
+4. **Tool descriptions are instructions for the agent:** write self-contained facts ("ob's PC budget is €2000", not "budget is 2000"), search before writing, and how to answer "did you mean".
+5. **`mem export`:** prints every topic and its facts as markdown to stdout, on demand. Read-only, never changes anything. Useful as a readable backup and to diff over time in git.
    1. Format, per topic, with topics sorted by name and facts by `created_at`:
-
       ```
       # topic name
       ## topic description
@@ -99,13 +142,16 @@
       - fact 2
       ```
 
-   2. A fact containing a newline gets it replaced with a space, so every fact stays one list item.
-7. **`mem tidy`:** the daily pass. In v1 it's pure code:
+6. **`mem tidy`:** the daily pass. In v1 it's pure code:
    1. Usage decay: a few if statements with threshold values ob picks by hand. They look at how long since a fact or topic was last retrieved (last_retrieved_at) and how many times it was retrieved (hit_count). Never at how old something is, and never tuned automatically. Facts that decay marks as obsolete are hard-deleted.
    2. Topics left with no facts are deleted.
    3. Topics over the fact cap are listed.
-   4. A systemd user timer runs it once a day, with `Persistent=true` so a run missed while the laptop was asleep happens on wake. No daemon.
-   5. It holds a file lock, so two passes never run at once.
+7. **Claude Code notes** (the wiring itself lives outside `mem`, per ground rule 3):
+   1. A UserPromptSubmit hook of type `mcp_tool` calls `inject` with `{"prompt": "${prompt}", "session_id": "${session_id}"}`. The tool's text output is added to the context next to the prompt. The default timeout on UserPromptSubmit is 30 seconds, and a timeout or failure lets the prompt through without injection.
+   2. A SessionStart hook with matcher `compact` calls `clear_injected` with `{"session_id": "${session_id}"}`.
+   3. Observed `session_id` behaviour: the same for every prompt in a session; new on a fresh start and on `/clear`; kept on resume and on compaction.
+   4. Headless runs (`claude -p`, like the SessionEnd transcript analyzer) fire the same hooks with input that looks exactly like an interactive session, so `mem` can't tell them apart. They must be ignored on the harness side, by starting them with hooks disabled (`--settings '{"disableAllHooks": true}'`).
+   5. Still to verify once `inject` exists: that `${prompt}` and `${session_id}` are substituted in `mcp_tool` input on UserPromptSubmit (only command hooks were tested so far), and that the hook's `mcp_tool` call reaches the same `mem mcp` process the agent talks to, since `get_topic` relies on it for the session id.
 
 ### 6. Logging and tuning
 
@@ -121,14 +167,14 @@
 
 ## v2: continuous refinement
 
-The goal: the daily pass keeps going over the memories and refines them. It merges duplicates, splits topics that grew too big, merges topics that drifted together, and finds groups held together by purpose rather than subject ("things to tell Dirk"). Embeddings can't see purpose, so this needs a language model. Code does everything it can first, and the model reviews and fixes what code proposes. Reviewing a proposal is far easier for a small model than building groups from scratch. The model never deletes anything for being obsolete (ground rule 7).
+The goal: the daily pass keeps going over the memories and refines them. It merges duplicates, splits topics that grew too big, merges topics that drifted together, and finds groups held together by purpose rather than subject ("things to tell Jason"). Embeddings can't see purpose, so this needs a language model. Code does everything it can first, and the model reviews and fixes what code proposes. Reviewing a proposal is far easier for a small model than building groups from scratch. The model never deletes anything for being obsolete (ground rule 7).
 
 1. **Built-in language model:** goinfer (a pure Go library that runs language models) with Gemma 4 E2B (Google's small model, Apache 2.0 license, about 1.5GB). Move to E4B (bigger, needs a few GB of RAM) only if E2B fails on the test cases.
    1. Download the weights on first run with a SHA-256 check instead of embedding them in the binary.
    2. Pin goinfer to a fixed version. It's a small project, not yet at version 1.0.
    3. Put it behind a small Go interface of your own so it can be swapped.
    4. Temperature 0 (the model always picks its most likely next word, so the same input gives the same output) and constrained output (the model can only produce text that matches a fixed JSON shape). Validate the result anyway.
-2. **Never on a path anyone waits for.** On CPU in pure Go it will probably manage only a few words per second, so `mem context` and `mem mcp` never load it. It only runs inside `mem tidy`, which holds a file lock so two passes never run at once.
+2. **Never on a path anyone waits for.** On CPU in pure Go it will probably manage only a few words per second...TODO:complete
 3. **The model steps run inside the daily pass** (`mem tidy`), after the v1 decay deletions.
    1. Add `last_consolidated_at` to topics. The model steps only look at topics changed since their last pass, so a daily run stays quick.
 4. **Merging duplicate facts within a topic:**
