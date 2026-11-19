@@ -75,7 +75,7 @@ func (r *MemoriesRepository) ConditionBuilderForBM25(searchQuery string) (*strin
 }
 
 func (r *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery string) (*[]Memory, error) {
-	brother, err := r.ConditionBuilderForBM25(searchQuery)
+	sanitizedQuery, err := r.ConditionBuilderForBM25(searchQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (r *MemoriesRepository) GetAllByBM25Desc(ctx context.Context, searchQuery s
 		FROM memories_fts 
 		JOIN memories ON memories.id = memories_fts.rowid
 		WHERE memories_fts MATCH ? ORDER BY rank
-		`, *brother).Find(&results).Error
+		`, *sanitizedQuery).Find(&results).Error
 	if err != nil {
 		return nil, err
 	}
