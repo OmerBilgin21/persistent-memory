@@ -2,10 +2,12 @@ package domain
 
 import (
 	"context"
-	"persistent-memory/internal/persistence"
-	"persistent-memory/util"
+	"fmt"
 	"slices"
 	"sync"
+
+	"persistent-memory/internal/persistence"
+	"persistent-memory/util"
 )
 
 type MemService struct {
@@ -24,14 +26,17 @@ func NewMemService(store *persistence.Store, embedService *EmbedService,
 	}, nil
 }
 
-// withTransaction runs fn against repositories bound to a single transaction.
+// This runs fn against repositories bound to a single transaction.
 // Anything reached through s.store instead of repos stays on the pool.
-func (s *MemService) withTransaction(ctx context.Context,
-	fn func(repos *persistence.Store) error,
-) error {
+func (s *MemService) withTransaction(
+	ctx context.Context,
+	fn func(repos *persistence.Store) Result,
+) Result {
 	txStore, tx, err := s.store.Begin(ctx)
 	if err != nil {
-		return err
+		return UnexpectedErrorResult{
+			Err: fmt.Errorf("error while trying to open a transaction: %w", err),
+		}
 	}
 
 	committed := false
@@ -46,7 +51,9 @@ func (s *MemService) withTransaction(ctx context.Context,
 	}
 
 	if err := tx.Commit(); err != nil {
-		return err
+		return UnexpectedErrorResult{
+			Err: fmt.Errorf("error while committing the transaction: %w", err),
+		}
 	}
 	committed = true
 
