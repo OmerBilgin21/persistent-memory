@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"persistent-memory/internal/persistence"
 	"persistent-memory/util"
 
@@ -35,46 +36,10 @@ func (s *MemService) createTopic(ctx context.Context, normalizedName, normalized
 	return &toBeCreated.Id, nil
 }
 
-func (s *MemService) createMemory(ctx context.Context, normalizedFact string, topicId uint, factVector []float32) (*uint, error) {
-	toBeCreated := persistence.Memory{
-		TopicId:          topicId,
-		NormalizedVector: factVector,
-		Content:          normalizedFact,
-	}
-
-	err := s.store.Memories.Create(ctx, &toBeCreated)
-	if err != nil {
-		return nil, err
-	}
-
-	return &toBeCreated.Id, nil
-}
-
-func (s *MemService) getTopicsOfMemories(ctx context.Context, memories []SimilarityMemory) (*[]SimilarityTopic, error) {
-	var topicIds []uint
-	for _, m := range memories {
-		topicIds = append(topicIds, m.TopicId)
-	}
-	topics, err := s.store.Topics.GetByIds(ctx, topicIds)
-	if err != nil {
-		return nil, err
-	}
-	var similarityTopics []SimilarityTopic
-	for _, t := range *topics {
-		similarityTopics = append(similarityTopics, SimilarityTopic{
-			Name:        t.Name,
-			Id:          t.Id,
-			Description: t.Description,
-		})
-	}
-
-	return &similarityTopics, nil
-}
-
-func (s *MemService) handleCreateMemoryResult(ctx context.Context, err error, cosineSortedMemories *[]SimilarityMemory, payload CreateMemory) Result {
+func (s *MemService) handleCreateMemoryResult(ctx context.Context, err error, cosineSortedMemories *[]SimilarityMemory, payload CreateMemory, store *persistence.Store) Result {
 	if errors.Is(err, gorm.ErrForeignKeyViolated) {
 		selectedMemories := (*cosineSortedMemories)[:min(s.similarityAcceptedCountThreshold, len(*cosineSortedMemories))]
-		topTopics, err := s.getTopicsOfMemories(ctx, selectedMemories)
+		topTopics, err := getTopicsOfMemories(ctx, selectedMemories, store)
 		if err != nil {
 			return RejectedMemoryUpsertResult{
 				Reason: fmt.Sprintf(`The topic you are trying to create this memory in does not exist.
@@ -117,40 +82,44 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 		}
 	}
 
-	memories, err := s.store.Memories.GetAll(ctx)
-	if err != nil {
-		return nil, UnexpectedErrorResult{
-			Err: err,
-		}
-	}
+	var createdId *uint
 
-	cosineSortedMemories, err := s.GetCosineSortedMemories(ctx, *factVector, *memories)
-	if err != nil {
-		return nil, UnexpectedErrorResult{
-			Err: err,
-		}
-	}
-
-	var similarMemories []SimilarityMemory
-
-	for _, r := range *cosineSortedMemories {
-		if r.CosineRank >= InsertThreshold {
-			similarMemories = append(similarMemories, r)
-		}
-	}
-
-	if payload.Force {
-		createdId, err := s.createMemory(ctx, normalizedFact, payload.TopicId, *factVector)
+	tres := s.withTransaction(ctx, func(repos *persistence.Store) Result {
+		memories, err := repos.Memories.GetAll(ctx)
 		if err != nil {
-			return nil, s.handleCreateMemoryResult(ctx, err, cosineSortedMemories, payload)
+			return UnexpectedErrorResult{
+				Err: err,
+			}
 		}
 
-		return createdId, nil
-	}
+		cosineSortedMemories, err := s.GetCosineSortedMemories(ctx, *factVector, *memories)
+		if err != nil {
+			return UnexpectedErrorResult{
+				Err: err,
+			}
+		}
 
-	if len(similarMemories) > 0 {
-		return nil, RejectedMemoryUpsertResult{
-			Reason: fmt.Sprintf(`The fact you have given 
+		var similarMemories []SimilarityMemory
+
+		for _, r := range *cosineSortedMemories {
+			if r.CosineRank >= InsertThreshold {
+				similarMemories = append(similarMemories, r)
+			}
+		}
+
+		if payload.Force {
+			tcreatedId, err := createMemory(ctx, normalizedFact, payload.TopicId, *factVector, repos)
+			if err != nil {
+				return s.handleCreateMemoryResult(ctx, err, cosineSortedMemories, payload, repos)
+			}
+
+			createdId = tcreatedId
+			return nil
+		}
+
+		if len(similarMemories) > 0 {
+			return RejectedMemoryUpsertResult{
+				Reason: fmt.Sprintf(`The fact you have given 
 				has many very similar memories to it.
 				Therefore the create has been rejected.
 				Consider either updating the memories or not creating a new one.
@@ -160,12 +129,20 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 				Similar memories that have been found:
 				%+v
 				`, payload.Fact, similarMemories),
+			}
 		}
-	}
 
-	createdId, err := s.createMemory(ctx, normalizedFact, payload.TopicId, *factVector)
-	if err != nil {
-		return nil, s.handleCreateMemoryResult(ctx, err, cosineSortedMemories, payload)
+		tcreatedId, err := createMemory(ctx, normalizedFact, payload.TopicId, *factVector, repos)
+		if err != nil {
+			return s.handleCreateMemoryResult(ctx, err, cosineSortedMemories, payload, repos)
+		}
+
+		createdId = tcreatedId
+		return nil
+	})
+
+	if tres != nil {
+		return nil, tres
 	}
 
 	return createdId, nil
