@@ -58,3 +58,37 @@ func getTopicByName(ctx context.Context, name string, store *persistence.Store) 
 	}, nil
 }
 
+func isEmptyAfterNorm(str, attrName string) *RejectedMemoryUpsertResult {
+	if len(str) == 0 || str == " " {
+		return &RejectedMemoryUpsertResult{
+			Reason: attrName + " can not be empty",
+		}
+	}
+
+	return nil
+}
+
+func isStrPtrNotEmpty(name *string) bool {
+	if name != nil {
+		if str := util.NormalizeStr(*name); len(str) != 0 && str != " " {
+			return true
+		}
+	}
+
+	return false
+}
+
+func createTopic(ctx context.Context, normalizedName, normalizedDesc string, nameVector []float32, store *persistence.Store) (*uint, error) {
+	toBeCreated := persistence.Topic{
+		Name:             normalizedName,
+		Description:      normalizedDesc,
+		NormalizedVector: nameVector,
+	}
+
+	err := store.Topics.Create(ctx, &toBeCreated)
+	if err != nil {
+		return nil, err
+	}
+
+	return &toBeCreated.Id, nil
+}

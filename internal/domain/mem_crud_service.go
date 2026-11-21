@@ -11,31 +11,6 @@ import (
 	"gorm.io/gorm"
 )
 
-func (s *MemService) isEmptyAfterNorm(str, attrName string) *RejectedMemoryUpsertResult {
-	if len(str) == 0 || str == " " {
-		return &RejectedMemoryUpsertResult{
-			Reason: attrName + " can not be empty",
-		}
-	}
-
-	return nil
-}
-
-func (s *MemService) createTopic(ctx context.Context, normalizedName, normalizedDesc string, nameVector []float32) (*uint, error) {
-	toBeCreated := persistence.Topic{
-		Name:             normalizedName,
-		Description:      normalizedDesc,
-		NormalizedVector: nameVector,
-	}
-
-	err := s.store.Topics.Create(ctx, &toBeCreated)
-	if err != nil {
-		return nil, err
-	}
-
-	return &toBeCreated.Id, nil
-}
-
 func (s *MemService) handleCreateMemoryResult(ctx context.Context, err error, cosineSortedMemories *[]SimilarityMemory, payload CreateMemory, store *persistence.Store) Result {
 	if errors.Is(err, gorm.ErrForeignKeyViolated) {
 		selectedMemories := (*cosineSortedMemories)[:min(s.similarityAcceptedCountThreshold, len(*cosineSortedMemories))]
@@ -65,7 +40,7 @@ func (s *MemService) handleCreateMemoryResult(ctx context.Context, err error, co
 
 func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMemory) (*uint, Result) {
 	normalizedFact := util.NormalizeStr(payload.Fact)
-	if err := s.isEmptyAfterNorm(normalizedFact, "Fact"); err != nil {
+	if err := isEmptyAfterNorm(normalizedFact, "Fact"); err != nil {
 		return nil, *err
 	}
 
@@ -151,7 +126,7 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 func (s *MemService) CreateOrRejectTopic(ctx context.Context, payload CreateTopic) (*uint, Result) {
 	normalizedName := util.NormalizeStr(payload.Name)
 
-	if err := s.isEmptyAfterNorm(normalizedName, "Topic name"); err != nil {
+	if err := isEmptyAfterNorm(normalizedName, "Topic name"); err != nil {
 		return nil, *err
 	}
 
@@ -163,7 +138,7 @@ func (s *MemService) CreateOrRejectTopic(ctx context.Context, payload CreateTopi
 
 	normalizedDesc := util.NormalizeStr(payload.Description)
 
-	if err := s.isEmptyAfterNorm(normalizedDesc, "Topic description"); err != nil {
+	if err := isEmptyAfterNorm(normalizedDesc, "Topic description"); err != nil {
 		return nil, *err
 	}
 
