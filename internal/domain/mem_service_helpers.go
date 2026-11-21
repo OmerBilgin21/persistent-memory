@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"persistent-memory/internal/persistence"
+	"persistent-memory/util"
 )
 
 func createMemory(ctx context.Context, normalizedFact string, topicId uint, factVector []float32, store *persistence.Store) (*uint, error) {
@@ -43,3 +44,17 @@ func getTopicsOfMemories(ctx context.Context, memories []SimilarityMemory, store
 
 	return &similarityTopics, nil
 }
+
+func getTopicByName(ctx context.Context, name string, store *persistence.Store) (*SimilarityTopic, error) {
+	topic, err := store.Topics.GetByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SimilarityTopic{
+		Description: topic.Description,
+		Id:          topic.Id,
+		Name:        topic.Name,
+	}, nil
+}
+

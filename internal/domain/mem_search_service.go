@@ -60,19 +60,6 @@ func (s *MemService) withTransaction(
 	return nil
 }
 
-func (s *MemService) GetTopicByName(ctx context.Context, name string) (*SimilarityTopic, error) {
-	topic, err := s.store.Topics.GetByName(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-
-	return &SimilarityTopic{
-		Description: topic.Description,
-		Id:          topic.Id,
-		Name:        topic.Name,
-	}, nil
-}
-
 func (s *MemService) GetRFFRank(position int) float32 {
 	return float32(float32(1) / (float32(60) + float32(position)))
 }
