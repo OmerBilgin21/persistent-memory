@@ -18,3 +18,13 @@ func NormalizeStr(searchQuery string) string {
 	searchQuery = RecursiveGetRidOfTwoSpaces(searchQuery)
 	return searchQuery
 }
+
+func IsStrPtrNotEmpty(name *string) bool {
+	if name != nil {
+		if str := NormalizeStr(*name); len(str) != 0 && str != " " {
+			return true
+		}
+	}
+
+	return false
+}

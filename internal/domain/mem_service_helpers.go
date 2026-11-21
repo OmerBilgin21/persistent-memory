@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"persistent-memory/internal/persistence"
-	"persistent-memory/util"
 )
 
 func createMemory(ctx context.Context, normalizedFact string, topicId uint, factVector []float32, store *persistence.Store) (*uint, error) {
@@ -66,16 +65,6 @@ func isEmptyAfterNorm(str, attrName string) *RejectedMemoryUpsertResult {
 	}
 
 	return nil
-}
-
-func isStrPtrNotEmpty(name *string) bool {
-	if name != nil {
-		if str := util.NormalizeStr(*name); len(str) != 0 && str != " " {
-			return true
-		}
-	}
-
-	return false
 }
 
 func createTopic(ctx context.Context, normalizedName, normalizedDesc string, nameVector []float32, store *persistence.Store) (*uint, error) {
