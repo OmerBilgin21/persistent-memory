@@ -230,14 +230,11 @@ func (s *MemService) CreateOrRejectTopic(ctx context.Context, payload CreateTopi
 }
 
 func (s *MemService) UpdateTopic(ctx context.Context, payload UpdateTopic) (*SimilarityTopic, Result) {
-	var isNameProcessable bool
+	isNameProcessable := false
 	var normalizedName string
 	var nameVector *[]float32
 	if util.IsStrPtrNotEmpty(payload.Name) {
 		normalizedName = util.NormalizeStr(*payload.Name)
-		if err := isEmptyAfterNorm(normalizedName, "Topic name"); err != nil {
-			return nil, *err
-		}
 
 		var err error
 		nameVector, err = s.embedService.Embed(normalizedName)
@@ -326,9 +323,6 @@ func (s *MemService) UpdateTopic(ctx context.Context, payload UpdateTopic) (*Sim
 		if util.IsStrPtrNotEmpty(payload.Description) {
 			descChanged = true
 			normalizedDesc := util.NormalizeStr(*payload.Description)
-			if err := isEmptyAfterNorm(normalizedDesc, "Topic description"); err != nil {
-				return *err
-			}
 
 			toBeUpdated.Description = normalizedDesc
 		}
@@ -363,76 +357,82 @@ func (s *MemService) UpdateTopic(ctx context.Context, payload UpdateTopic) (*Sim
 }
 
 func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*SimilarityMemory, Result) {
-	existingMemory, err := s.store.Memories.Get(ctx, payload.MemoryId)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	isContentUpdateProcessable := false
+	var normalizedFact string
+	var factVector *[]float32
+
+	if util.IsStrPtrNotEmpty(payload.Fact) {
+		normalizedFact = util.NormalizeStr(*payload.Fact)
+
+		if len(normalizedFact) > 280 {
 			return nil, RejectedMemoryUpsertResult{
-				Reason: "a memory with that ID is not found",
+				Reason: "Fact can not be longer than 280 characters",
 			}
 		}
 
-		return nil, UnexpectedErrorResult{
-			Err: err,
+		var err error
+		factVector, err = s.embedService.Embed(normalizedFact)
+		if err != nil {
+			return nil, UnexpectedErrorResult{
+				Err: err,
+			}
 		}
+		isContentUpdateProcessable = true
 	}
 
-	factExists := false
-	topicExists := false
+	var similarityMemory *SimilarityMemory
 
-	toBeUpdated := *existingMemory
-
-	if payload.Fact != nil || payload.TopicId != nil {
-		if payload.Fact != nil {
-			normalizedFact := util.NormalizeStr(*payload.Fact)
-
-			if err := isEmptyAfterNorm(normalizedFact, "Fact"); err != nil {
-				return nil, *err
-			}
-
-			if len(normalizedFact) > 280 {
-				return nil, RejectedMemoryUpsertResult{
-					Reason: "Fact can not be longer than 280 characters",
+	res := s.withTransaction(ctx, func(repos *persistence.Store) Result {
+		existingMemory, err := repos.Memories.Get(ctx, payload.MemoryId)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return RejectedMemoryUpsertResult{
+					Reason: "a memory with that ID is not found",
 				}
 			}
 
-			if normalizedFact != existingMemory.Content {
-				factExists = true
-				factVector, err := s.embedService.Embed(normalizedFact)
+			return UnexpectedErrorResult{
+				Err: err,
+			}
+		}
+
+		factChanged := false
+		topicChanged := false
+
+		toBeUpdated := *existingMemory
+
+		if isContentUpdateProcessable && normalizedFact != existingMemory.Content {
+			factChanged = true
+
+			if payload.Force {
+				toBeUpdated.Content = normalizedFact
+				toBeUpdated.NormalizedVector = *factVector
+			} else {
+				memories, err := repos.Memories.GetAll(ctx)
 				if err != nil {
-					return nil, UnexpectedErrorResult{
+					return UnexpectedErrorResult{
 						Err: err,
 					}
 				}
 
-				if payload.Force {
-					toBeUpdated.Content = normalizedFact
-					toBeUpdated.NormalizedVector = *factVector
-				} else {
-					memories, err := s.store.Memories.GetAll(ctx)
-					if err != nil {
-						return nil, UnexpectedErrorResult{
-							Err: err,
-						}
+				cosineSortedMemories, err := s.GetCosineSortedMemories(ctx, *factVector, *memories)
+				if err != nil {
+					return UnexpectedErrorResult{
+						Err: err,
 					}
+				}
 
-					cosineSortedMemories, err := s.GetCosineSortedMemories(ctx, *factVector, *memories)
-					if err != nil {
-						return nil, UnexpectedErrorResult{
-							Err: err,
-						}
+				var similarMemories []SimilarityMemory
+
+				for _, r := range *cosineSortedMemories {
+					if r.Id != payload.MemoryId && r.CosineRank >= InsertThreshold {
+						similarMemories = append(similarMemories, r)
 					}
+				}
 
-					var similarMemories []SimilarityMemory
-
-					for _, r := range *cosineSortedMemories {
-						if r.Id != payload.MemoryId && r.CosineRank >= InsertThreshold {
-							similarMemories = append(similarMemories, r)
-						}
-					}
-
-					if len(similarMemories) > 0 {
-						return nil, RejectedMemoryUpsertResult{
-							Reason: fmt.Sprintf(`The fact you have given has many very similar memories to it.
+				if len(similarMemories) > 0 {
+					return RejectedMemoryUpsertResult{
+						Reason: fmt.Sprintf(`The fact you have given has many very similar memories to it.
 								Therefore the update has been rejected.
 								Consider either updating one of the found memories instead or not updating this one.
 								If you think this is a mistake, use force: true for force-updating the memory.
@@ -441,56 +441,61 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 								Similar memories that have been found:
 								%+v
 								`, *payload.Fact, similarMemories),
-						}
 					}
-
-					toBeUpdated.Content = normalizedFact
-					toBeUpdated.NormalizedVector = *factVector
 				}
+
+				toBeUpdated.Content = normalizedFact
+				toBeUpdated.NormalizedVector = *factVector
 			}
 		}
 
 		if payload.TopicId != nil && *payload.TopicId != existingMemory.TopicId {
-			_, err := s.store.Topics.Get(ctx, *payload.TopicId)
+			_, err := repos.Topics.Get(ctx, *payload.TopicId)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return nil, RejectedMemoryUpsertResult{
+					return RejectedMemoryUpsertResult{
 						Reason: "the given to-be-updated topic ID is not found",
 					}
 				}
 
-				return nil, UnexpectedErrorResult{
+				return UnexpectedErrorResult{
 					Err: err,
 				}
 			}
 
-			topicExists = true
+			topicChanged = true
 			toBeUpdated.TopicId = *payload.TopicId
 		}
 
-		if !factExists && !topicExists {
-			return nil, RejectedMemoryUpsertResult{
+		// I have to do this because neither gorm nor sqlite is smart enough to
+		// not update records on partial updates where the given column values
+		// are the same as existing column values
+		if !factChanged && !topicChanged {
+			return RejectedMemoryUpsertResult{
 				Reason: "there is nothing to update on the memory with your payload",
 			}
 		}
 
-		err := s.store.Memories.Update(ctx, &toBeUpdated)
+		err = repos.Memories.Update(ctx, &toBeUpdated)
 		if err != nil {
-			return nil, UnexpectedErrorResult{
+			return UnexpectedErrorResult{
 				Err: err,
 			}
 		}
 
-		return &SimilarityMemory{
+		similarityMemory = &SimilarityMemory{
 			TopicId: toBeUpdated.TopicId,
 			Content: toBeUpdated.Content,
 			Id:      toBeUpdated.Id,
-		}, nil
+		}
+		return nil
+	})
+
+	if res != nil {
+		return nil, res
 	}
 
-	return nil, RejectedMemoryUpsertResult{
-		Reason: "there is nothing to update on the memory with your payload",
-	}
+	return similarityMemory, nil
 }
 
 func (s *MemService) DeleteTopic(ctx context.Context, id uint) error {
