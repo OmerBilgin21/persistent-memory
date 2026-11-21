@@ -9,7 +9,7 @@
 5. Tuning is never the user's job. Thresholds are set automatically by `mem` from a built-in example set that ob writes and knows to be correct. Usage decay is the exception: ob sets its values by hand.
 6. All memories are written by the agent in the harness (Claude Code or Pi) through their respective create tools. `mem` never reads session transcripts. Because of that, the harness must push the agent to save: a Stop hook in Claude Code, and the equivalent in Pi, asks the agent to save decisions and changed facts before it stops. Watch writes per day (from `created_at`): if that number flatlines, the nudge isn't working.
 7. Every removal is a hard delete. Nothing is archived, soft-deleted or kept around.
-   1. Obsolescence (a memory no longer being needed) is decided only by the usage decay rules in code: how long since a memory was last needed, and how many times it was needed (section 5, item 7). The built-in model never deletes anything for being obsolete.
+   1. Obsolescence (a memory no longer being needed) is decided only by the usage decay rules in code: how long since a memory was last needed, and how many times it was needed (section 5, item 6). The built-in model never deletes anything for being obsolete.
    2. Other removals: the agent calling `delete`, and merging (v2, item 4), where the merged fact replaces the originals.
 8. A daily pass (`mem tidy`) keeps the memories neat and their number manageable. In v1 it's pure code; v2 adds the model steps.
 9. Search is fair: ranking uses only similarity and the merge of the two result lists. Usage history never changes how something ranks.
@@ -30,7 +30,10 @@
    2. `memories`: id (integer primary key), topic_id (required, foreign key to topics, deleted along with its topic), content (at most 280 characters), embedding, created_at, updated_at, last_retrieved_at, hit_count.
    3. `memories_fts`: SQLite's full-text search index over `memories.content`. It reads the text from the memories table instead of keeping its own copy, and three triggers (insert, update, delete) keep it in sync. Use the `porter unicode61` tokenizer: it splits text into words and reduces English words to their stem, so "running" also matches "run".
    4. `injected(session_id, memory_id)`: which memories were already shown in a session, so they aren't shown twice.
-   5. `query_log(query, top_scores, injected_ids, ts)`: every query, its scores, and what got shown. For your own debugging.
+   5. `events(id, kind, payload, ts)`: one row per search, injection and write tool call, for your own debugging and for calibration. `kind` says which it was, and `payload` is JSON whose shape depends on `kind`. It's stored as JSON text, not SQLite's binary JSONB, so it stays readable in any SQLite viewer.
+      1. `search`: the query, plus the returned memory ids with their cosine and fusion scores.
+      2. `inject`: the prompt, the session id, the top scores, and the memory ids that got shown.
+      3. Write tools (`create_topic`, `update_topic`, `create_memory`, `update_memory`): the tool input, the outcome (written, rejected, error), the rejection or error text, and the fit score once it exists.
    6. `settings(key, value)`: what the program needs to run correctly. That's the embedding model name, the vector size, the checksum of the weights, and every number produced by automatic tuning (section 6).
 4. **Why integer primary keys:** the search index points at rows by row number. With an integer primary key, that number never changes. Without one, VACUUM can renumber rows and silently break the index.
 5. **Embed outside the transaction.** Compute embeddings before starting the transaction, so the write lock isn't held while the model runs. Then, inside one transaction, write the fact and update the topic's embedding.
@@ -39,7 +42,7 @@
 ### 2. Embeddings
 
 1. **aikit, pinned to one version in go.mod.** Why not gte-go (the first choice): its tokenizer only handled ASCII. It never stripped accents and it cut multi-byte characters in half, so text like "café Müller İstanbul" scored 0.81 against the original model and "emoji 🎉 and 中文" scored 0.94. aikit passes both.
-2. **Safety copy of the dependency:** the Go module mirror keeps public modules with a recognised license like MIT, but doesn't promise to keep everything forever. Copy aikit's download folder (`$(go env GOMODCACHE)/cache/download/github.com/townsendmerino`) to a backup location. If aikit ever disappears, build with `GOPROXY=file://<backup>,https://proxy.golang.org`.
+2. **Safety copy of the dependency:** the Go module mirror keeps public modules with a recognised license like MIT, but doesn't promise to keep everything forever. Keep a git clone of the exact aikit tag pinned in go.mod outside the repo, and re-clone it after every aikit update. If aikit ever disappears, add `replace github.com/townsendmerino/aikit => <path to the clone>` to go.mod. A local replace isn't checked against go.sum, so the clone has to stay on the pinned tag.
 3. **The model** is the Hugging Face folder as downloaded: `config.json`, `vocab.txt` and `model.safetensors` (the weights are stored as float16). No conversion step.
 4. **Accuracy check:** `reference.json` holds vectors from the original Python model (sentence-transformers). Every sentence must score at least 0.999 cosine against aikit's output. The current set passes at 0.99999 or better, including accents, emoji, Chinese, code, an empty string, a single letter and text over the 512 token limit.
    1. Add `Ömer`, `Straße`, `naïve` and `Ağrı`. Names and places will contain these, and `ß` is handled differently from accent marks.
@@ -55,7 +58,7 @@
 2. **Keyword search:** SQLite's built-in `bm25()`. Raw prompts break the search syntax (hyphens, quotes, colons, and the words AND, OR, NOT, NEAR), so wrap each word in double quotes and join them with OR. The default is AND, which matches almost nothing for a full sentence.
 3. **Merge the two result lists by position, not by score** (reciprocal rank fusion). Each fact gets 1 / (60 + its position) from each list, and the two are added. This works even though cosine and bm25 scores are on completely different scales.
 4. **A topic's score** is the score of its best fact.
-5. **Nothing else affects ranking.** Usage history (last_retrieved_at, hit_count) is only used by the daily pass to decide deletion (section 5, item 7).
+5. **Nothing else affects ranking.** Usage history (last_retrieved_at, hit_count) is only used by the daily pass to decide deletion (section 5, item 6).
 
 ### 4. Write rules
 
@@ -111,9 +114,8 @@ Four tools, two shared checks.
 
 1. **One transaction.** Embed before it opens, then run the checks and the write inside one write transaction, so two sessions can't both pass the check and insert the same fact.
 2. **Descriptions are display only.** Shown in `get` and in injection, never embedded, never used for matching.
-3. **Memory cap.** If a topic now has more than about 30 memories, add a warning to the response. Don't reject.
-4. **Decision log from Go.** One row per tool call: tool, outcome (written, rejected by memory check, rejected by topic name check, not found), whether `force` was used, candidates with scores as JSON, fit score. On a rejection, commit the transaction with just the log row instead of rolling back. Database triggers separately keep an audit trail of the actual row changes.
-5. **Thresholds.** Memory threshold and topic threshold are both raw cosine and configurable. The 0.85 fallback gets replaced in section 6. Before building the rest, embed 10 to 15 hand picked pairs (same fact, same domain but different, negations) to check the fallback is anywhere near sane for GTE.
+3. **Every write call is logged** as an `events` row (section 1, table 5). A thin wrapper around the service writes the row after the call returns, so a rejection gets logged without touching the write's transaction. Database triggers separately keep an audit trail of the actual row changes.
+4. **Thresholds.** Memory threshold and topic threshold are both raw cosine and configurable. The 0.85 fallback gets replaced in section 6. Before building the rest, embed 10 to 15 hand picked pairs (same fact, same domain but different, negations) to check the fallback is anywhere near sane for GTE.
 
 ### 5. Interfaces
 
@@ -155,7 +157,7 @@ Four tools, two shared checks.
 
 ### 6. Logging and tuning
 
-1. **Log every query** in `query_log` from day one.
+1. **Log every query** in `events` from day one.
 2. **Automatic tuning,** never in the user's hands:
    1. The binary ships a built-in example set written by ob, with the correct answer for every example:
       1. Duplicate, near duplicate, related and unrelated fact pairs, plus a few negation pairs. These tune the duplicate thresholds and the consolidation grouping threshold.
@@ -174,7 +176,7 @@ The goal: the daily pass keeps going over the memories and refines them. It merg
    2. Pin goinfer to a fixed version. It's a small project, not yet at version 1.0.
    3. Put it behind a small Go interface of your own so it can be swapped.
    4. Temperature 0 (the model always picks its most likely next word, so the same input gives the same output) and constrained output (the model can only produce text that matches a fixed JSON shape). Validate the result anyway.
-2. **Never on a path anyone waits for.** On CPU in pure Go it will probably manage only a few words per second...TODO:complete
+2. **Never on a path anyone waits for.** On CPU in pure Go it will probably manage only a few words per second, so `mem mcp` never loads it, `inject` included. It only runs inside `mem tidy`.
 3. **The model steps run inside the daily pass** (`mem tidy`), after the v1 decay deletions.
    1. Add `last_consolidated_at` to topics. The model steps only look at topics changed since their last pass, so a daily run stays quick.
 4. **Merging duplicate facts within a topic:**
@@ -197,5 +199,5 @@ The goal: the daily pass keeps going over the memories and refines them. It merg
 
 ## Not planned
 
-1. Reading session transcripts (`mem extract`). The agent writing through `upsert` has the full context and is a far better model.
+1. Reading session transcripts (`mem extract`). The agent writing through the create and update tools has the full context and is a far better model.
 2. Approximate nearest neighbour indexes, SQLite vector extensions, multilingual support, a separate background server, cloud.
