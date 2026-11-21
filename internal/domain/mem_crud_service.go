@@ -142,17 +142,6 @@ func (s *MemService) CreateOrRejectTopic(ctx context.Context, payload CreateTopi
 		return nil, *err
 	}
 
-	topicWithTheSameName, _ := s.GetTopicByName(ctx, normalizedName)
-	if topicWithTheSameName != nil {
-		return nil, RejectedMemoryUpsertResult{
-			Reason: fmt.Sprintf(`There is already a topic with this exact same name,
-				duplicates are not allowed.
-				Topic with the same name: %+v
-				Your payload: %+v
-				`, topicWithTheSameName, payload),
-		}
-	}
-
 	nameVector, err := s.embedService.Embed(normalizedName)
 	if err != nil {
 		return nil, UnexpectedErrorResult{
@@ -160,40 +149,56 @@ func (s *MemService) CreateOrRejectTopic(ctx context.Context, payload CreateTopi
 		}
 	}
 
-	if payload.Force {
-		createdId, err := s.createTopic(ctx, normalizedName, normalizedDesc, *nameVector)
+	var createdId *uint
+
+	res := s.withTransaction(ctx, func(repos *persistence.Store) Result {
+		topicWithTheSameName, _ := getTopicByName(ctx, normalizedName, repos)
+		if topicWithTheSameName != nil {
+			return RejectedMemoryUpsertResult{
+				Reason: fmt.Sprintf(`There is already a topic with this exact same name,
+				duplicates are not allowed.
+				Topic with the same name: %+v
+				Your payload: %+v
+				`, topicWithTheSameName, payload),
+			}
+		}
+
+		if payload.Force {
+			tcreatedId, err := createTopic(ctx, normalizedName, normalizedDesc, *nameVector, repos)
+			if err != nil {
+				return UnexpectedErrorResult{
+					Err: err,
+				}
+			}
+
+			createdId = tcreatedId
+		}
+
+		topics, err := repos.Topics.GetAll(ctx)
 		if err != nil {
-			return nil, UnexpectedErrorResult{
+			return UnexpectedErrorResult{
 				Err: err,
 			}
 		}
 
-		return createdId, nil
-	}
-
-	topics, err := s.store.Topics.GetAll(ctx)
-	if err != nil {
-		return nil, UnexpectedErrorResult{
-			Err: err,
+		cosineSortedTopics, err := s.GetCosineSortedTopics(ctx, *nameVector, *topics)
+		if err != nil {
+			return UnexpectedErrorResult{
+				Err: err,
+			}
 		}
-	}
 
-	cosineSortedTopics, err := s.GetCosineSortedTopics(ctx, *nameVector, *topics)
-	if err != nil {
-		return nil, UnexpectedErrorResult{Err: err}
-	}
+		var similarTopics []SimilarityTopic
 
-	var similarTopics []SimilarityTopic
-
-	for _, r := range *cosineSortedTopics {
-		if r.CosineRank >= InsertThreshold {
-			similarTopics = append(similarTopics, r)
+		for _, r := range *cosineSortedTopics {
+			if r.CosineRank >= InsertThreshold {
+				similarTopics = append(similarTopics, r)
+			}
 		}
-	}
 
-	if len(similarTopics) > 0 {
-		return nil, RejectedMemoryUpsertResult{
-			Reason: fmt.Sprintf(`The topic name you have given 
+		if len(similarTopics) > 0 {
+			return RejectedMemoryUpsertResult{
+				Reason: fmt.Sprintf(`The topic name you have given 
 				has many very similar topics to it.
 				Therefore the create has been rejected.
 				Consider either updating the given topic or not creating a new one.
@@ -203,52 +208,73 @@ func (s *MemService) CreateOrRejectTopic(ctx context.Context, payload CreateTopi
 				Similar topics that have been found:
 				%+v
 				`, payload.Name, similarTopics),
+			}
 		}
-	}
 
-	createdId, err := s.createTopic(ctx, normalizedName, normalizedDesc, *nameVector)
-	if err != nil {
-		return nil, UnexpectedErrorResult{
-			Err: err,
+		tcreatedId, err := createTopic(ctx, normalizedName, normalizedDesc, *nameVector, repos)
+		if err != nil {
+			return UnexpectedErrorResult{
+				Err: err,
+			}
 		}
+		createdId = tcreatedId
+
+		return nil
+	})
+
+	if res != nil {
+		return nil, res
 	}
 
 	return createdId, nil
 }
 
 func (s *MemService) UpdateTopic(ctx context.Context, payload UpdateTopic) (*SimilarityTopic, Result) {
-	existingTopic, err := s.store.Topics.Get(ctx, payload.TopicId)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, RejectedMemoryUpsertResult{
-				Reason: "a topic with that ID is not found",
-			}
+	var isNameProcessable bool
+	var normalizedName string
+	var nameVector *[]float32
+	if util.IsStrPtrNotEmpty(payload.Name) {
+		normalizedName = util.NormalizeStr(*payload.Name)
+		if err := isEmptyAfterNorm(normalizedName, "Topic name"); err != nil {
+			return nil, *err
 		}
 
-		return nil, UnexpectedErrorResult{
-			Err: err,
+		var err error
+		nameVector, err = s.embedService.Embed(normalizedName)
+		if err != nil {
+			return nil, UnexpectedErrorResult{
+				Err: err,
+			}
 		}
+		isNameProcessable = true
 	}
 
-	toBeUpdated := *existingTopic
-	if payload.Name != nil || payload.Description != nil {
-		if payload.Name != nil {
-			normalizedName := util.NormalizeStr(*payload.Name)
-			if err := s.isEmptyAfterNorm(normalizedName, "Topic name"); err != nil {
-				return nil, *err
-			}
+	var similarityTopic *SimilarityTopic
 
-			topicWithTheSameName, _ := s.GetTopicByName(ctx, normalizedName)
-			if topicWithTheSameName != nil && topicWithTheSameName.Id != payload.TopicId {
-				return nil, RejectedMemoryUpsertResult{
-					Reason: "There is already a topic with this exact same name, duplicates are not allowed",
+	res := s.withTransaction(ctx, func(repos *persistence.Store) Result {
+		existingTopic, err := repos.Topics.Get(ctx, payload.TopicId)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return RejectedMemoryUpsertResult{
+					Reason: "a topic with that ID is not found",
 				}
 			}
 
-			nameVector, err := s.embedService.Embed(normalizedName)
-			if err != nil {
-				return nil, UnexpectedErrorResult{
-					Err: err,
+			return UnexpectedErrorResult{
+				Err: err,
+			}
+		}
+
+		toBeUpdated := *existingTopic
+		nameChanged := false
+		descChanged := false
+
+		if isNameProcessable {
+			nameChanged = true
+			topicWithTheSameName, _ := getTopicByName(ctx, normalizedName, repos)
+			if topicWithTheSameName != nil && topicWithTheSameName.Id != payload.TopicId {
+				return RejectedMemoryUpsertResult{
+					Reason: "There is already a topic with this exact same name, duplicates are not allowed",
 				}
 			}
 
@@ -256,16 +282,16 @@ func (s *MemService) UpdateTopic(ctx context.Context, payload UpdateTopic) (*Sim
 				toBeUpdated.Name = normalizedName
 				toBeUpdated.NormalizedVector = *nameVector
 			} else {
-				topics, err := s.store.Topics.GetAll(ctx)
+				topics, err := repos.Topics.GetAll(ctx)
 				if err != nil {
-					return nil, UnexpectedErrorResult{
+					return UnexpectedErrorResult{
 						Err: err,
 					}
 				}
 
 				cosineSortedTopics, err := s.GetCosineSortedTopics(ctx, *nameVector, *topics)
 				if err != nil {
-					return nil, UnexpectedErrorResult{
+					return UnexpectedErrorResult{
 						Err: err,
 					}
 				}
@@ -279,7 +305,7 @@ func (s *MemService) UpdateTopic(ctx context.Context, payload UpdateTopic) (*Sim
 				}
 
 				if len(similarTopics) > 0 {
-					return nil, RejectedMemoryUpsertResult{
+					return RejectedMemoryUpsertResult{
 						Reason: fmt.Sprintf(`The topic name you have given has many very similar topics to it.
 								Therefore the update has been rejected.
 								Consider either merging the found topic(s) by removing some and updating the rest or not updating this one.
@@ -297,32 +323,43 @@ func (s *MemService) UpdateTopic(ctx context.Context, payload UpdateTopic) (*Sim
 			}
 		}
 
-		if payload.Description != nil {
+		if util.IsStrPtrNotEmpty(payload.Description) {
+			descChanged = true
 			normalizedDesc := util.NormalizeStr(*payload.Description)
-			if err := s.isEmptyAfterNorm(normalizedDesc, "Topic description"); err != nil {
-				return nil, *err
+			if err := isEmptyAfterNorm(normalizedDesc, "Topic description"); err != nil {
+				return *err
 			}
 
 			toBeUpdated.Description = normalizedDesc
 		}
 
-		err := s.store.Topics.Update(ctx, &toBeUpdated)
-		if err != nil {
-			return nil, UnexpectedErrorResult{
-				Err: err,
+		if nameChanged || descChanged {
+			err := repos.Topics.Update(ctx, &toBeUpdated)
+			if err != nil {
+				return UnexpectedErrorResult{
+					Err: err,
+				}
+			}
+
+			similarityTopic = &SimilarityTopic{
+				Name:        toBeUpdated.Name,
+				Description: toBeUpdated.Description,
+				Id:          toBeUpdated.Id,
+			}
+		} else {
+			return RejectedMemoryUpsertResult{
+				Reason: "Both the name and the description can not be empty",
 			}
 		}
 
-		return &SimilarityTopic{
-			Name:        toBeUpdated.Name,
-			Description: toBeUpdated.Description,
-			Id:          toBeUpdated.Id,
-		}, nil
+		return nil
+	})
+
+	if res != nil {
+		return nil, res
 	}
 
-	return nil, RejectedMemoryUpsertResult{
-		Reason: "Both the name and the description can not be empty",
-	}
+	return similarityTopic, nil
 }
 
 func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*SimilarityMemory, Result) {
@@ -348,7 +385,7 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 		if payload.Fact != nil {
 			normalizedFact := util.NormalizeStr(*payload.Fact)
 
-			if err := s.isEmptyAfterNorm(normalizedFact, "Fact"); err != nil {
+			if err := isEmptyAfterNorm(normalizedFact, "Fact"); err != nil {
 				return nil, *err
 			}
 
