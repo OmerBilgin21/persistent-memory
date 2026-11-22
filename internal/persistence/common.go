@@ -50,7 +50,6 @@ type Store struct {
 	db         *gorm.DB
 	Memories   MemoriesRepositoryInterface
 	Topics     TopicsRepositoryInterface
-	Settings   SettingsRepositoryInterface
 	Injections InjectionsRepositoryInterface
 }
 
@@ -59,7 +58,6 @@ func NewStore(db *gorm.DB) *Store {
 		db:         db,
 		Memories:   NewMemoriesRepository(db),
 		Topics:     NewTopicsRepository(db),
-		Settings:   NewSettingsRepository(db),
 		Injections: NewInjectionsRepository(db),
 	}
 }
