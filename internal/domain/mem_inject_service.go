@@ -47,11 +47,81 @@ func (s *MemService) markAsShown(ctx context.Context, sessionId string, memories
 }
 
 func (s *MemService) Inject(ctx context.Context, prompt, sessionId string) SimilarityResult {
-	// TODO: stub, implement
-	return SimilarityResult{}
+	memories, err := s.store.Memories.GetAll(ctx)
+	if err != nil {
+		return SimilarityResult{
+			Err: err,
+		}
+	}
+
+	normalizedPrompt := util.NormalizeStr(prompt)
+	if len(normalizedPrompt) == 0 || normalizedPrompt == " " {
+		return SimilarityResult{
+			Err: fmt.Errorf("The prompt is empty"),
+		}
+	}
+
+	promptVector, err := s.embedService.Embed(normalizedPrompt)
+	if err != nil {
+		return SimilarityResult{
+			Err: err,
+		}
+	}
+
+	cosineSortedMemories, err := s.GetCosineSortedMemories(ctx, *promptVector, *memories)
+	if err != nil {
+		return SimilarityResult{
+			Err: err,
+		}
+	}
+
+	if len(*cosineSortedMemories) == 0 {
+		return SimilarityResult{}
+	}
+
+	medianValue := (*cosineSortedMemories)[int(len(*cosineSortedMemories)/2)].CosineRank
+	seenValues, err := s.store.Injections.GetMemoryIdsBySessionId(ctx, sessionId)
+	if err != nil {
+		return SimilarityResult{
+			Err: err,
+		}
+	}
+
+	var toBeInjected []SimilarityMemory
+	for _, m := range *cosineSortedMemories {
+		if slices.Contains(seenValues, m.Id) {
+			continue
+		}
+
+		if len(toBeInjected) >= MemoryRetrievalLimit || m.CosineRank < MemoryInjectionThreshold || m.CosineRank < medianValue+medianValue*MemoryInjectionSuperiorityPercentage {
+			break
+		}
+
+		toBeInjected = append(toBeInjected, SimilarityMemory{
+			Id:              m.Id,
+			CosineRank:      m.CosineRank,
+			TopicId:         m.TopicId,
+			Content:         m.Content,
+			DidBM25EffectIt: false,
+		})
+	}
+
+	s.markAsShown(ctx, sessionId, toBeInjected)
+
+	topics, err := getTopicsOfMemories(ctx, toBeInjected, s.store)
+	if err != nil {
+		return SimilarityResult{
+			Err: err,
+		}
+	}
+
+	return SimilarityResult{
+		Memories: toBeInjected,
+		Topics:   *topics,
+		Err:      nil,
+	}
 }
 
 func (s *MemService) ClearInjected(ctx context.Context, sessionId string) error {
-	// TODO: stub, implement
-	return nil
+	return s.store.Injections.DeleteBySessionId(ctx, sessionId)
 }
