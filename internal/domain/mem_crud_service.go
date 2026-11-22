@@ -79,7 +79,7 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 		var similarMemories []SimilarityMemory
 
 		for _, r := range *cosineSortedMemories {
-			if r.CosineRank >= InsertThreshold {
+			if r.CosineRank >= InsertMemoryThreshold {
 				similarMemories = append(similarMemories, r)
 			}
 		}
@@ -121,7 +121,7 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 			*cosineSortedMemories,
 			repos,
 			true,
-			0.3,
+			RejectionThresholdPercentage,
 			nil,
 			payload.Force,
 		)
@@ -216,7 +216,7 @@ func (s *MemService) CreateOrRejectTopic(ctx context.Context, payload CreateTopi
 		var similarTopics []SimilarityTopic
 
 		for _, r := range *cosineSortedTopics {
-			if r.CosineRank >= InsertThreshold {
+			if r.CosineRank >= InsertTopicThreshold {
 				similarTopics = append(similarTopics, r)
 			}
 		}
@@ -321,7 +321,7 @@ func (s *MemService) UpdateTopic(ctx context.Context, payload UpdateTopic) (*Sim
 				var similarTopics []SimilarityTopic
 
 				for _, r := range *cosineSortedTopics {
-					if r.Id != payload.TopicId && r.CosineRank >= InsertThreshold {
+					if r.Id != payload.TopicId && r.CosineRank >= InsertTopicThreshold {
 						similarTopics = append(similarTopics, r)
 					}
 				}
@@ -472,7 +472,7 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 				var similarMemories []SimilarityMemory
 
 				for _, r := range *cosineSortedMemories {
-					if r.Id != payload.MemoryId && r.CosineRank >= InsertThreshold {
+					if r.Id != payload.MemoryId && r.CosineRank >= InsertMemoryThreshold {
 						similarMemories = append(similarMemories, r)
 					}
 				}
@@ -520,7 +520,7 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 			*cosineSortedMemories,
 			repos,
 			false,
-			0.3,
+			RejectionThresholdPercentage,
 			&SimilarityMemory{
 				Content: existingMemory.Content,
 				Id:      existingMemory.Id,
