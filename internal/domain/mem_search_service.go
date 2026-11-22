@@ -3,11 +3,10 @@ package domain
 import (
 	"context"
 	"fmt"
-	"slices"
-	"sync"
-
 	"persistent-memory/internal/persistence"
 	"persistent-memory/util"
+	"slices"
+	"sync"
 )
 
 type MemService struct {
