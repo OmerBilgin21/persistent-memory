@@ -3,10 +3,10 @@ package domain
 import (
 	"context"
 	"fmt"
+	"slices"
+
 	"persistent-memory/internal/persistence"
 	"persistent-memory/util"
-	"slices"
-	"sync"
 )
 
 type MemService struct {
@@ -127,7 +127,11 @@ func (s *MemService) GetCosineSortedTopics(ctx context.Context, normalizedSearch
 	return &cosineSorted, nil
 }
 
-func (s *MemService) Search(ctx context.Context, fact string) SimilarityResult {
+func (s *MemService) Search(
+	ctx context.Context,
+	fact string,
+	sessionId string,
+) SimilarityResult {
 	normalizedFact := util.NormalizeStr(fact)
 	factVector, err := s.embedService.Embed(normalizedFact)
 	if err != nil {
@@ -203,22 +207,12 @@ func (s *MemService) Search(ctx context.Context, fact string) SimilarityResult {
 	selectedMemories := (*cosineSorted)[:min(s.similarityAcceptedCountThreshold, len(*cosineSorted))]
 
 	var topicIds []uint
-	var memoryIds []uint
 	for _, m := range selectedMemories {
 		topicIds = append(topicIds, m.TopicId)
-		memoryIds = append(memoryIds, m.Id)
 	}
-	var wg sync.WaitGroup
-
-	wg.Go(func() {
-		// I ignore these specific errors cause what am I gonna do about it, abort ship
-		_ = s.store.Memories.UpdateHitCountAndLRA(ctx, memoryIds)
-		_ = s.store.Topics.UpdateHitCountAndLRA(ctx, topicIds)
-	})
 
 	persTopics, err := s.store.Topics.GetByIds(ctx, topicIds)
 	if err != nil {
-		wg.Wait()
 		return SimilarityResult{
 			Err: err,
 		}
@@ -233,7 +227,7 @@ func (s *MemService) Search(ctx context.Context, fact string) SimilarityResult {
 		})
 	}
 
-	wg.Wait()
+	s.markAsShown(ctx, sessionId, selectedMemories)
 
 	return SimilarityResult{
 		Topics:   topics,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"persistent-memory/internal/persistence"
 	"persistent-memory/util"
 
@@ -575,7 +576,7 @@ func (s *MemService) GetMemory(ctx context.Context, id uint) (*SimilarityMemory,
 	}, nil
 }
 
-func (s *MemService) GetTopicWithMemories(ctx context.Context, id uint) (*SimilarityTopicWithMemories, error) {
+func (s *MemService) GetTopicWithMemories(ctx context.Context, id uint, sessionId string) (*SimilarityTopicWithMemories, error) {
 	topic, err := s.store.Topics.GetWithMemories(ctx, id)
 	if err != nil {
 		return nil, err
@@ -589,6 +590,9 @@ func (s *MemService) GetTopicWithMemories(ctx context.Context, id uint) (*Simila
 			Id:      m.Id,
 		})
 	}
+
+	s.markAsShown(ctx, sessionId, memories)
+
 	return &SimilarityTopicWithMemories{
 		SimilarityTopic: SimilarityTopic{
 			Id:          topic.Id,
