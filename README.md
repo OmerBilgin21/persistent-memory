@@ -43,7 +43,7 @@
 
 1. **aikit, pinned to one version in go.mod.** Why not gte-go (the first choice): its tokenizer only handled ASCII. It never stripped accents and it cut multi-byte characters in half, so text like "café Müller İstanbul" scored 0.81 against the original model and "emoji 🎉 and 中文" scored 0.94. aikit passes both.
 2. **Safety copy of the dependency:** the Go module mirror keeps public modules with a recognised license like MIT, but doesn't promise to keep everything forever. Keep a git clone of the exact aikit tag pinned in go.mod outside the repo, and re-clone it after every aikit update. If aikit ever disappears, add `replace github.com/townsendmerino/aikit => <path to the clone>` to go.mod. A local replace isn't checked against go.sum, so the clone has to stay on the pinned tag.
-3. **The model** is the Hugging Face folder as downloaded: `config.json`, `vocab.txt` and `model.safetensors` (the weights are stored as float16). No conversion step.
+3. **The model** is the Hugging Face folder as downloaded: `config.json`, `vocab.txt`, `tokenizer.json` and `model.safetensors` (the weights are stored as float16). No conversion step. aikit's loader refuses to start without `tokenizer.json`.
 4. **Accuracy check:** `reference.json` holds vectors from the original Python model (sentence-transformers). Every sentence must score at least 0.999 cosine against aikit's output. The current set passes at 0.99999 or better, including accents, emoji, Chinese, code, an empty string, a single letter and text over the 512 token limit.
    1. Add `Ömer`, `Straße`, `naïve` and `Ağrı`. Names and places will contain these, and `ß` is handled differently from accent marks.
    2. Rerun after every aikit update.
@@ -77,11 +77,12 @@ Four tools, two shared checks.
    2. Otherwise compare the name embedding against every other topic's name embedding.
    3. Topics at or above the topic threshold: reject with "did you mean X or Y?", returning topic id, name, description, memory count. Tell the model to use one of those, or resend with `force`.
 
-3. **Fit score** (logged only in v1, never rejects).
-   1. Group the memory check's top k by topic, scoring each topic by its best memory.
-   2. Log the chosen topic's score next to the best other topic's score.
-   3. Skip when the chosen topic has no memories yet.
-   4. Turn this into a "this looks closer to topic X" rejection only if calibration shows it would catch real mistakes.
+3. **Fit score** (skipped when `force` is set).
+   1. Use the memory check's top k, excluding the memory itself when updating.
+   2. Compare the best match overall against the chosen topic's best memory.
+   3. Skip when the chosen topic has no memories in the top k, or when the best match already belongs to it.
+   4. Reject when the best match beats the chosen topic's best memory by more than the margin. The margin is relative (0.3 means 30% higher), a constant for now, and comes from automatic tuning (section 6).
+   5. The rejection suggests the better topic (id, name, description) next to the chosen one.
 
 #### Tools
 
@@ -101,14 +102,16 @@ Four tools, two shared checks.
    2. Embed the content, outside the transaction.
    3. Reject if the topic doesn't exist, returning the top topics from the memory check's grouped result so the model has something to retry with.
    4. Memory check.
-   5. Insert, log the fit score, return the memory id.
+   5. Fit score.
+   6. Insert, return the memory id.
 
 4. **`update_memory(id, content?, topic_id?, force?)`**
    1. Reject if the memory doesn't exist, or if neither content nor topic_id is given.
    2. Same content rules as `create_memory`.
    3. If the content changes: embed it outside the transaction, then run the memory check excluding this memory.
-   4. If the topic changes: reject if the new topic doesn't exist, and log the fit score.
-   5. Update, return the memory id.
+   4. If the topic changes: reject if the new topic doesn't exist.
+   5. Fit score, whenever the content or the topic changes.
+   6. Update, return the memory id.
 
 #### Every write
 
@@ -137,7 +140,7 @@ Four tools, two shared checks.
    3. Inject the remaining facts whose cosine clears a minimum and sits at least a gap above the baseline. Both numbers come from automatic tuning (section 6).
    4. Why a gap above the baseline: GTE scores even unrelated text fairly high, so a vague prompt ("ok, fix that") can score evenly against many facts, and a minimum alone would let one creep over by chance. Comparing against the baseline instead of the second best still lets two equally strong matches through.
    5. With only a few facts, the median sits high and little gets through. That fixes itself as the store grows.
-3. **At most 5 entries,** best first. Each is a fact plus its topic (id, name, description, fact count). Several facts from the same topic can each be an entry.
+3. **At most a fixed number of entries,** best first. It's 5 for now, as a constant that moves to `settings` later. Each is a fact plus its topic (id, name, description, fact count). Several facts from the same topic can each be an entry.
    1. Whatever the agent has seen isn't injected again in the same session. That means facts returned by `inject`, by `search`, and every fact of a topic read with `get_topic`. All three record them in `injections` and count as a retrieval for usage decay (`last_retrieved_at`, `hit_count`).
 4. **Tool descriptions are instructions for the agent:** write self-contained facts ("ob's PC budget is €2000", not "budget is 2000"), search before writing, and how to answer "did you mean".
 5. **`mem export`:** prints every topic and its facts as markdown to stdout, on demand. Read-only, never changes anything. Useful as a readable backup and to diff over time in git.
