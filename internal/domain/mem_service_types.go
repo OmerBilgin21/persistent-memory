@@ -62,9 +62,12 @@ type SimilarityResult struct {
 }
 
 const (
-	InsertTopicThreshold         float32 = 0.85
-	InsertMemoryThreshold        float32 = 0.85
-	RejectionThresholdPercentage float32 = 0.3
+	InsertTopicThreshold                 float32 = 0.85
+	InsertMemoryThreshold                float32 = 0.85
+	RejectionThresholdPercentage         float32 = 0.3
+	MemoryInjectionThreshold             float32 = 0.80
+	MemoryRetrievalLimit                 int     = 5
+	MemoryInjectionSuperiorityPercentage float32 = 0.08
 )
 
 type CreateMemory struct {
