@@ -59,7 +59,7 @@ func (s *MemService) withTransaction(
 	return nil
 }
 
-func (s *MemService) GetRFFRank(position int) float32 {
+func (s *MemService) GetRRFRank(position int) float32 {
 	return float32(float32(1) / (float32(60) + float32(position)))
 }
 
@@ -163,12 +163,12 @@ func (s *MemService) Search(ctx context.Context, fact string) SimilarityResult {
 			TopicId: m.TopicId,
 			Content: m.Content,
 			Id:      m.Id,
-			RFFRank: s.GetRFFRank(i),
+			RRFRank: s.GetRRFRank(i),
 		})
 	}
 
 	for i := range *cosineSorted {
-		(*cosineSorted)[i].RFFRank = s.GetRFFRank(i)
+		(*cosineSorted)[i].RRFRank = s.GetRRFRank(i)
 	}
 
 	bm25Index := make(SimilarityMemoryIndex, len(bm25Ranked))
@@ -181,19 +181,19 @@ func (s *MemService) Search(ctx context.Context, fact string) SimilarityResult {
 		bm25Equivalent, ok := bm25Index[m.Id]
 
 		if ok {
-			(*cosineSorted)[i].RFFRank = m.RFFRank + bm25Equivalent.RFFRank
+			(*cosineSorted)[i].RRFRank = m.RRFRank + bm25Equivalent.RRFRank
 			(*cosineSorted)[i].DidBM25EffectIt = true
 		} else {
-			(*cosineSorted)[i].RFFRank = m.RFFRank
+			(*cosineSorted)[i].RRFRank = m.RRFRank
 			(*cosineSorted)[i].DidBM25EffectIt = false
 		}
 	}
 
 	slices.SortStableFunc(*cosineSorted, func(a, b SimilarityMemory) int {
-		if a.RFFRank < b.RFFRank {
+		if a.RRFRank < b.RRFRank {
 			return 1
 		}
-		if a.RFFRank > b.RFFRank {
+		if a.RRFRank > b.RRFRank {
 			return -1
 		}
 

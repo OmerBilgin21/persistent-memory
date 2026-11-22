@@ -35,7 +35,7 @@ type SimilarityTopic struct {
 	Description     string  `json:"description"`
 	Id              uint    `json:"id"`
 	CosineRank      float32 `json:"cosine_rank"`
-	RFFRank         float32 `json:"rff_rank"`
+	RRFRank         float32 `json:"rrf_rank"`
 	DidBM25EffectIt bool    `json:"did_bm_25_effect_it"`
 }
 
@@ -49,7 +49,7 @@ type SimilarityMemory struct {
 	Content         string  `json:"content"`
 	Id              uint    `json:"id"`
 	CosineRank      float32 `json:"cosine_rank"`
-	RFFRank         float32 `json:"rff_rank"`
+	RRFRank         float32 `json:"rrf_rank"`
 	DidBM25EffectIt bool    `json:"did_bm_25_effect_it"`
 }
 
