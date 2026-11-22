@@ -47,16 +47,20 @@ func (t *Tx) Rollback() error {
 }
 
 type Store struct {
-	db       *gorm.DB
-	Memories MemoriesRepositoryInterface
-	Topics   TopicsRepositoryInterface
+	db         *gorm.DB
+	Memories   MemoriesRepositoryInterface
+	Topics     TopicsRepositoryInterface
+	Settings   SettingsRepositoryInterface
+	Injections InjectionsRepositoryInterface
 }
 
 func NewStore(db *gorm.DB) *Store {
 	return &Store{
-		db:       db,
-		Memories: NewMemoriesRepository(db),
-		Topics:   NewTopicsRepository(db),
+		db:         db,
+		Memories:   NewMemoriesRepository(db),
+		Topics:     NewTopicsRepository(db),
+		Settings:   NewSettingsRepository(db),
+		Injections: NewInjectionsRepository(db),
 	}
 }
 

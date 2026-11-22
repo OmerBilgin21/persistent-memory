@@ -33,7 +33,7 @@ END;
 `
 
 func migrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(&Memory{}, &Topic{}); err != nil {
+	if err := db.AutoMigrate(&Memory{}, &Topic{}, &Setting{}, &Injection{}); err != nil {
 		return err
 	}
 	if err := db.Exec(ftsSchema).Error; err != nil {
