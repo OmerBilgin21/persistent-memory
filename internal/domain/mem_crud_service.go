@@ -11,33 +11,6 @@ import (
 	"gorm.io/gorm"
 )
 
-func (s *MemService) handleCreateMemoryResult(ctx context.Context, err error, cosineSortedMemories *[]SimilarityMemory, payload CreateMemory, store *persistence.Store) Result {
-	if errors.Is(err, gorm.ErrForeignKeyViolated) {
-		selectedMemories := (*cosineSortedMemories)[:min(s.similarityAcceptedCountThreshold, len(*cosineSortedMemories))]
-		topTopics, err := getTopicsOfMemories(ctx, selectedMemories, store)
-		if err != nil {
-			return RejectedMemoryUpsertResult{
-				Reason: fmt.Sprintf(`The topic you are trying to create this memory in does not exist.
-							Your payload:
-							%+v
-							`, payload),
-			}
-		}
-
-		return RejectedMemoryUpsertResult{
-			Reason: fmt.Sprintf(`The topic you are trying to create this memory in does not exist.
-							Your payload:
-							%+v
-							Topics of top matching memories:
-							%+v
-							`, payload, topTopics),
-		}
-	}
-	return UnexpectedErrorResult{
-		Err: err,
-	}
-}
-
 func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMemory) (*uint, Result) {
 	normalizedFact := util.NormalizeStr(payload.Fact)
 	if err := isEmptyAfterNorm(normalizedFact, "Fact"); err != nil {
@@ -74,6 +47,35 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 			}
 		}
 
+		topic, err := repos.Topics.Get(ctx, payload.TopicId)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				selectedMemories := (*cosineSortedMemories)[:min(s.similarityAcceptedCountThreshold, len(*cosineSortedMemories))]
+				topTopics, err := getTopicsOfMemories(ctx, selectedMemories, repos)
+				if err != nil {
+					return RejectedMemoryUpsertResult{
+						Reason: fmt.Sprintf(`The topic you are trying to create this memory in does not exist.
+							Your payload:
+							%+v
+							`, payload),
+					}
+				}
+
+				return RejectedMemoryUpsertResult{
+					Reason: fmt.Sprintf(`The topic you are trying to create this memory in does not exist.
+							Your payload:
+							%+v
+							Topics of top matching memories:
+							%+v
+							`, payload, topTopics),
+				}
+			}
+
+			return UnexpectedErrorResult{
+				Err: err,
+			}
+		}
+
 		var similarMemories []SimilarityMemory
 
 		for _, r := range *cosineSortedMemories {
@@ -85,7 +87,9 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 		if payload.Force {
 			tcreatedId, err := createMemory(ctx, normalizedFact, payload.TopicId, *factVector, repos)
 			if err != nil {
-				return s.handleCreateMemoryResult(ctx, err, cosineSortedMemories, payload, repos)
+				return UnexpectedErrorResult{
+					Err: err,
+				}
 			}
 
 			createdId = tcreatedId
@@ -107,9 +111,30 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 			}
 		}
 
+		res := checkForMemoryTopicFitAndSuggest(
+			ctx,
+			SimilarityTopic{
+				Id:          topic.Id,
+				Name:        topic.Name,
+				Description: topic.Description,
+			},
+			*cosineSortedMemories,
+			repos,
+			true,
+			0.3,
+			nil,
+			payload.Force,
+		)
+
+		if res != nil {
+			return res
+		}
+
 		tcreatedId, err := createMemory(ctx, normalizedFact, payload.TopicId, *factVector, repos)
 		if err != nil {
-			return s.handleCreateMemoryResult(ctx, err, cosineSortedMemories, payload, repos)
+			return UnexpectedErrorResult{
+				Err: err,
+			}
 		}
 
 		createdId = tcreatedId
@@ -396,6 +421,42 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 			}
 		}
 
+		if factVector == nil || !isContentUpdateProcessable {
+			factVector = (*[]float32)(&existingMemory.NormalizedVector)
+		}
+
+		var topic *persistence.Topic
+		if payload.TopicId != nil {
+			topic, err = repos.Topics.Get(ctx, *payload.TopicId)
+		} else {
+			topic, err = repos.Topics.Get(ctx, existingMemory.TopicId)
+		}
+
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return RejectedMemoryUpsertResult{
+					Reason: "the given to-be-updated topic ID is not found",
+				}
+			}
+
+			return UnexpectedErrorResult{
+				Err: err,
+			}
+		}
+		memories, err := repos.Memories.GetAll(ctx)
+		if err != nil {
+			return UnexpectedErrorResult{
+				Err: err,
+			}
+		}
+
+		cosineSortedMemories, err := s.GetCosineSortedMemories(ctx, *factVector, *memories)
+		if err != nil {
+			return UnexpectedErrorResult{
+				Err: err,
+			}
+		}
+
 		factChanged := false
 		topicChanged := false
 
@@ -408,20 +469,6 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 				toBeUpdated.Content = normalizedFact
 				toBeUpdated.NormalizedVector = *factVector
 			} else {
-				memories, err := repos.Memories.GetAll(ctx)
-				if err != nil {
-					return UnexpectedErrorResult{
-						Err: err,
-					}
-				}
-
-				cosineSortedMemories, err := s.GetCosineSortedMemories(ctx, *factVector, *memories)
-				if err != nil {
-					return UnexpectedErrorResult{
-						Err: err,
-					}
-				}
-
 				var similarMemories []SimilarityMemory
 
 				for _, r := range *cosineSortedMemories {
@@ -450,19 +497,6 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 		}
 
 		if payload.TopicId != nil && *payload.TopicId != existingMemory.TopicId {
-			_, err := repos.Topics.Get(ctx, *payload.TopicId)
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return RejectedMemoryUpsertResult{
-						Reason: "the given to-be-updated topic ID is not found",
-					}
-				}
-
-				return UnexpectedErrorResult{
-					Err: err,
-				}
-			}
-
 			topicChanged = true
 			toBeUpdated.TopicId = *payload.TopicId
 		}
@@ -474,6 +508,29 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 			return RejectedMemoryUpsertResult{
 				Reason: "there is nothing to update on the memory with your payload",
 			}
+		}
+
+		res := checkForMemoryTopicFitAndSuggest(
+			ctx,
+			SimilarityTopic{
+				Id:          topic.Id,
+				Name:        topic.Name,
+				Description: topic.Description,
+			},
+			*cosineSortedMemories,
+			repos,
+			false,
+			0.3,
+			&SimilarityMemory{
+				Content: existingMemory.Content,
+				Id:      existingMemory.Id,
+				TopicId: existingMemory.TopicId,
+			},
+			payload.Force,
+		)
+
+		if res != nil {
+			return res
 		}
 
 		err = repos.Memories.Update(ctx, &toBeUpdated)

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"fmt"
 
 	"persistent-memory/internal/persistence"
 )
@@ -80,4 +81,103 @@ func createTopic(ctx context.Context, normalizedName, normalizedDesc string, nam
 	}
 
 	return &toBeCreated.Id, nil
+}
+
+func checkForMemoryTopicFitAndSuggest(
+	ctx context.Context,
+	topic SimilarityTopic,
+	cosineSortedMemories []SimilarityMemory,
+	store *persistence.Store,
+	createMode bool,
+	// between 0-1 represantation
+	rejectionThresholdPercentage float32,
+	existingMemory *SimilarityMemory,
+	force bool,
+) Result {
+	if rejectionThresholdPercentage > 1 || rejectionThresholdPercentage < 0 {
+		return nil
+	}
+
+	if force {
+		return nil
+	}
+
+	if existingMemory == nil && createMode == false {
+		// illogical invocation of the function
+		// we can't operate without ID on update mode
+		return nil
+	}
+	if len(cosineSortedMemories) == 0 {
+		return nil
+	}
+
+	var factsOfGivenTopic []SimilarityMemory
+	var bestOfGivenTopic SimilarityMemory
+	var bestMatch SimilarityMemory
+	if !createMode && cosineSortedMemories[0].Id == existingMemory.Id {
+		if len(cosineSortedMemories) > 1 {
+			bestMatch = cosineSortedMemories[1]
+		} else {
+			return nil
+		}
+	} else {
+		bestMatch = cosineSortedMemories[0]
+	}
+
+	for _, m := range cosineSortedMemories {
+		if existingMemory != nil && existingMemory.Id == m.Id {
+			continue
+		}
+
+		if m.TopicId == topic.Id {
+			if m.CosineRank > bestOfGivenTopic.CosineRank {
+				bestOfGivenTopic = m
+			}
+			factsOfGivenTopic = append(factsOfGivenTopic, m)
+		}
+	}
+
+	if len(factsOfGivenTopic) == 0 ||
+		bestMatch.TopicId == topic.Id ||
+		bestOfGivenTopic.CosineRank+(bestOfGivenTopic.CosineRank*rejectionThresholdPercentage) > bestMatch.CosineRank {
+		return nil
+	}
+
+	bestMatchTopic, err := store.Topics.Get(ctx, bestMatch.TopicId)
+	if err != nil {
+		// I think I'd rather not reject the model that is trying to either
+		// move a memory or create a memory just because my
+		// check for finding a better fit for a fact has failed.
+		// If everything before or after this is going to succeed,
+		// we just let it succeed. Though it'd certainly be weird
+		// if this had ever happened.
+		return nil
+	}
+
+	var reasonStr string
+	bestMatchSTopic := SimilarityTopic{
+		CosineRank:      bestMatch.CosineRank,
+		Id:              bestMatchTopic.Id,
+		Name:            bestMatchTopic.Name,
+		Description:     bestMatchTopic.Description,
+		DidBM25EffectIt: false,
+	}
+	if createMode {
+		reasonStr = fmt.Sprintf(`Despite the given topic may be a fit for the fact
+			that you are trying to create it in, there may be a better match for this fact
+			Consider adding it to the topic:
+			%+v
+			Your given topic:
+			%+v`, bestMatchSTopic, topic)
+	} else {
+		reasonStr = fmt.Sprintf(`Despite the given topic may be a fit for the fact
+			that you are trying to update, there may be a better match for this fact content:
+			%+v
+			Your given topic:
+			%+v`, bestMatchSTopic, topic)
+	}
+
+	return RejectedMemoryUpsertResult{
+		Reason: reasonStr,
+	}
 }
