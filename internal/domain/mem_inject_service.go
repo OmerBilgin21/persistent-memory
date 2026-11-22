@@ -3,10 +3,9 @@ package domain
 import (
 	"context"
 	"fmt"
-	"slices"
-
 	"persistent-memory/internal/persistence"
 	"persistent-memory/util"
+	"slices"
 )
 
 func (s *MemService) markAsShown(ctx context.Context, sessionId string, memories []SimilarityMemory) Result {
