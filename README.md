@@ -3,10 +3,10 @@
 ## Ground rules
 
 1. Pure Go with no C dependencies (`CGO_ENABLED=0`), built as one static binary called `mem`. Runs locally, with no background server.
-2. Embeddings come from aikit (pure Go, MIT license), running the GTE-Small model (thenlper/gte-small: English only, 384 numbers per vector, MIT license). aikit is a normal module dependency pinned in go.mod, not vendored. The model may be swapped later.
+2. Embeddings come from aikit (pure Go, MIT license), running the GTE-Small model (thenlper/gte-small: English only, 384 numbers per vector, MIT license). aikit is a normal module dependency pinned in go.mod, not vendored. The model and the aikit version stay as they are unless one turns out to be bad.
 3. Connecting `mem` to specific tools (Claude Code hooks, OpenCode plugins, lines in AGENTS.md) is out of scope. `mem` ships a command line interface and an MCP server. Wiring them up is the user's job.
 4. v1 uses no language model at all. `mem` never calls the harness's or a provider's language model. A language model only appears in v2, built into the binary.
-5. Tuning is never the user's job. Thresholds are set automatically by `mem` from a built-in example set that ob writes and knows to be correct. Usage decay is the exception: ob sets its values by hand.
+5. Tuning comes from a tool that is run by hand. It picks the thresholds from an example set that ob writes and knows to be correct, and writes them to a JSON file that's compiled into the binary (section 6). Usage decay is the exception: ob sets its values by hand.
 6. All memories are written by the agent in the harness (Claude Code or Pi) through their respective create tools. `mem` never reads session transcripts. Because of that, the harness must push the agent to save: a Stop hook in Claude Code, and the equivalent in Pi, asks the agent to save decisions and changed facts before it stops. Watch writes per day (from `created_at`): if that number flatlines, the nudge isn't working.
 7. Every removal is a hard delete. Nothing is archived, soft-deleted or kept around.
    1. Obsolescence (a memory no longer being needed) is decided only by the usage decay rules in code: how long since a memory was last needed, and how many times it was needed (section 5, item 6). The built-in model never deletes anything for being obsolete.
@@ -34,7 +34,6 @@
       1. `search`: the query, plus the returned memory ids with their cosine and fusion scores.
       2. `inject`: the prompt, the session id, the top scores, and the memory ids that got shown.
       3. Write tools (`create_topic`, `update_topic`, `create_memory`, `update_memory`): the tool input, the outcome (written, rejected, error), the rejection or error text, and the fit score once it exists.
-   6. `settings(key, value)`: what the program needs to run correctly. That's the embedding model name, the vector size, the checksum of the weights, and every number produced by automatic tuning (section 6).
 4. **Why integer primary keys:** the search index points at rows by row number. With an integer primary key, that number never changes. Without one, VACUUM can renumber rows and silently break the index.
 5. **Embed outside the transaction.** Compute embeddings before starting the transaction, so the write lock isn't held while the model runs. Then, inside one transaction, write the fact and update the topic's embedding.
 6. **Backups** with `VACUUM INTO 'backup.db'`, which writes a clean copy of the whole database to a new file.
@@ -43,14 +42,15 @@
 
 1. **aikit, pinned to one version in go.mod.** Why not gte-go (the first choice): its tokenizer only handled ASCII. It never stripped accents and it cut multi-byte characters in half, so text like "café Müller İstanbul" scored 0.81 against the original model and "emoji 🎉 and 中文" scored 0.94. aikit passes both.
 2. **Safety copy of the dependency:** the Go module mirror keeps public modules with a recognised license like MIT, but doesn't promise to keep everything forever. Keep a git clone of the exact aikit tag pinned in go.mod outside the repo, and re-clone it after every aikit update. If aikit ever disappears, add `replace github.com/townsendmerino/aikit => <path to the clone>` to go.mod. A local replace isn't checked against go.sum, so the clone has to stay on the pinned tag.
-3. **The model** is the Hugging Face folder as downloaded: `config.json`, `vocab.txt`, `tokenizer.json` and `model.safetensors` (the weights are stored as float16). No conversion step. aikit's loader refuses to start without `tokenizer.json`.
+3. **The model** is the Hugging Face folder as downloaded: `config.json`, `vocab.txt`, `tokenizer.json` and `model.safetensors` (the weights are stored as float16). No conversion step.
+   1. The files are compiled into the binary (`go:embed`), so `mem` runs anywhere without a model folder. This adds about 67MB to the binary.
+   2. aikit's `LoadBERT` only loads from a folder, so on start the files are written to a temporary folder and loaded from there.
+   3. `LoadBERT` refuses to start without `tokenizer.json`.
 4. **Accuracy check:** `reference.json` holds vectors from the original Python model (sentence-transformers). Every sentence must score at least 0.999 cosine against aikit's output. The current set passes at 0.99999 or better, including accents, emoji, Chinese, code, an empty string, a single letter and text over the 512 token limit.
    1. Add `Ömer`, `Straße`, `naïve` and `Ağrı`. Names and places will contain these, and `ß` is handled differently from accent marks.
    2. Rerun after every aikit update.
-5. **Weights checksum:** keep a SHA-256 checksum of the weights so a corrupted file gets caught.
-6. **Model change:** on start, if the model name or weights checksum in `settings` differs from what the binary expects, re-embed every topic and fact, then re-run automatic tuning, before doing anything else. Vectors from two different models can't be compared, so this must never be skipped.
-7. **Scale every vector to length 1 in one place,** right where embeddings come back from aikit, so nothing downstream can forget. aikit probably already does it; this is a cheap safety net. Then cosine similarity is just a dot product.
-8. **A topic's embedding** is computed from its name.
+5. **Scale every vector to length 1 in one place,** right where embeddings come back from aikit, so nothing downstream can forget. aikit probably already does it; this is a cheap safety net. Then cosine similarity is just a dot product.
+6. **A topic's embedding** is computed from its name.
 
 ### 3. Search and ranking
 
@@ -81,7 +81,7 @@ Four tools, two shared checks.
    1. Use the memory check's top k, excluding the memory itself when updating.
    2. Compare the best match overall against the chosen topic's best memory.
    3. Skip when the chosen topic has no memories in the top k, or when the best match already belongs to it.
-   4. Reject when the best match beats the chosen topic's best memory by more than the margin. The margin is relative (0.3 means 30% higher), a constant for now, and comes from automatic tuning (section 6).
+   4. Reject when the best match beats the chosen topic's best memory by more than the margin. The margin is relative (0.3 means 30% higher), a constant for now, and comes from tuning (section 6).
    5. The rejection suggests the better topic (id, name, description) next to the chosen one.
 
 #### Tools
@@ -137,10 +137,10 @@ Four tools, two shared checks.
 2. **When to inject:** a fact gets injected only if it stands out from the noise for this prompt.
    1. Score every fact against the prompt, and take the median of all those scores as the baseline. Most facts are unrelated to any given prompt, so the median shows what "unrelated" looks like this time. Already-shown facts count towards it too.
    2. Drop the facts the agent has already seen in this session (item 3).
-   3. Inject the remaining facts whose cosine clears a minimum and sits at least a gap above the baseline. Both numbers come from automatic tuning (section 6).
+   3. Inject the remaining facts whose cosine clears a minimum and sits at least a gap above the baseline. Both numbers come from tuning (section 6).
    4. Why a gap above the baseline: GTE scores even unrelated text fairly high, so a vague prompt ("ok, fix that") can score evenly against many facts, and a minimum alone would let one creep over by chance. Comparing against the baseline instead of the second best still lets two equally strong matches through.
    5. With only a few facts, the median sits high and little gets through. That fixes itself as the store grows.
-3. **At most a fixed number of entries,** best first. It's 5 for now, as a constant that moves to `settings` later. Each is a fact plus its topic (id, name, description, fact count). Several facts from the same topic can each be an entry.
+3. **At most a fixed number of entries,** best first. It's 5 for now, a constant in code. Each is a fact plus its topic (id, name, description, fact count). Several facts from the same topic can each be an entry.
    1. Whatever the agent has seen isn't injected again in the same session. That means facts returned by `inject`, by `search`, and every fact of a topic read with `get_topic`. All three record them in `injections` and count as a retrieval for usage decay (`last_retrieved_at`, `hit_count`).
 4. **Tool descriptions are instructions for the agent:** write self-contained facts ("ob's PC budget is €2000", not "budget is 2000"), search before writing, and how to answer "did you mean".
 5. **`mem export`:** prints every topic and its facts as markdown to stdout, on demand. Read-only, never changes anything. Useful as a readable backup and to diff over time in git.
@@ -167,13 +167,15 @@ Four tools, two shared checks.
 ### 6. Logging and tuning
 
 1. **Log every query** in `events` from day one.
-2. **Automatic tuning,** never in the user's hands:
-   1. The binary ships a built-in example set written by ob, with the correct answer for every example:
+2. **Tuning** comes from a tool that is run by hand, like the benchmark. It never runs on start:
+   1. An example set written by ob and kept in the repo, with the correct answer for every example:
       1. Duplicate, near duplicate, related and unrelated fact pairs, plus a few negation pairs. These tune the duplicate thresholds and the consolidation grouping threshold.
       2. Facts with prompts, and whether each prompt should inject them. These tune the injection minimum and gap.
       3. Facts and topics with queries and the results each should return. These tune search, topic resolution and the "did you mean" cutoff.
-   2. On first start and after every model change, `mem` runs the set, picks the numbers that get the most examples right, and writes them into `settings`.
-   3. Keep the number of tuned values small compared to the number of examples, and check the result on a part of the set that tuning didn't see. Otherwise the numbers just memorize the examples and fail on real data.
+   2. The tool runs the set, picks the numbers that get the most examples right, and writes them to a JSON file in the repo. Changes show up in git diffs.
+   3. The binary embeds that file (`go:embed`) and reads it once on start. A file that doesn't parse stops the start, and a test parses it so that's caught before shipping.
+   4. Keep the number of tuned values small compared to the number of examples, and check the result on a part of the set that tuning didn't see. Otherwise the numbers just memorize the examples and fail on real data.
+   5. The tool has integration tests of its own.
 3. **Test queries,** for you during development: about 30 queries with their expected results. Run them after every ranking change so you notice when something gets worse.
 
 ## v2: continuous refinement
@@ -210,3 +212,5 @@ The goal: the daily pass keeps going over the memories and refines them. It merg
 
 1. Reading session transcripts (`mem extract`). The agent writing through the create and update tools has the full context and is a far better model.
 2. Approximate nearest neighbour indexes, SQLite vector extensions, multilingual support, a separate background server, cloud.
+3. Tuning or re-embedding automatically on start, and detecting model changes. The model and aikit stay frozen, and tuning is run by hand (section 6).
+4. A checksum of the model weights. They're compiled into the binary.
