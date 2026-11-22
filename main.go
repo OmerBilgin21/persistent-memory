@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	db, err := persistence.DB()
+	db, err := persistence.DB("mem.db")
 	if err != nil {
 		panic(err)
 	}

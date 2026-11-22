@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -43,10 +44,11 @@ func migrate(db *gorm.DB) error {
 	return nil
 }
 
-func DB() (*gorm.DB, error) {
-	db, err := gorm.Open(sqlite.Open(`file:mem.db?_pragma=busy_timeout(5000)
+func DB(path string) (*gorm.DB, error) {
+	dsn := fmt.Sprintf(`file:%s?_pragma=busy_timeout(5000)
 		&_pragma=foreign_keys(1)
-		&_pragma=journal_mode(WAL)&_txlock=immediate`), &gorm.Config{
+		&_pragma=journal_mode(WAL)&_txlock=immediate`, path)
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		TranslateError: true,
 		Logger: logger.New(log.New(os.Stderr, "", log.LstdFlags), logger.Config{
 			SlowThreshold:             200 * time.Millisecond,
