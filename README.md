@@ -29,7 +29,7 @@
    1. `topics`: id (integer primary key), name (unique), description, embedding, updated_at, last_retrieved_at, hit_count.
    2. `memories`: id (integer primary key), topic_id (required, foreign key to topics, deleted along with its topic), content (at most 280 characters), embedding, created_at, updated_at, last_retrieved_at, hit_count.
    3. `memories_fts`: SQLite's full-text search index over `memories.content`. It reads the text from the memories table instead of keeping its own copy, and three triggers (insert, update, delete) keep it in sync. Use the `porter unicode61` tokenizer: it splits text into words and reduces English words to their stem, so "running" also matches "run".
-   4. `injected(session_id, memory_id)`: which memories were already shown in a session, so they aren't shown twice.
+   4. `injections(session_id, memory_id, created_at)`: which memories were already shown in a session, so they aren't shown twice. `created_at` lets old sessions' rows be cleaned up later.
    5. `events(id, kind, payload, ts)`: one row per search, injection and write tool call, for your own debugging and for calibration. `kind` says which it was, and `payload` is JSON whose shape depends on `kind`. It's stored as JSON text, not SQLite's binary JSONB, so it stays readable in any SQLite viewer.
       1. `search`: the query, plus the returned memory ids with their cosine and fusion scores.
       2. `inject`: the prompt, the session id, the top scores, and the memory ids that got shown.
@@ -122,17 +122,23 @@ Four tools, two shared checks.
 1. **`mem mcp`:** MCP server over stdin and stdout, using the official Go SDK. All logs go to stderr, because anything else printed to stdout corrupts the protocol. Tools:
    1. `create_topic(name, description, force?)`
    2. `update_memory(id, content?, topic_id?, force?)`
-   3. `search(query)`
+   3. `search(query)`: returns the top results, ungated (item 2 only applies to `inject`). Records what it returns in `injections` for the current session.
    4. `get_memory(id)`
-   5. `get_topic(id)`: a topic id returns its description and all its facts. Records every fact it returns in `injected` for the current session, so a topic the agent has read in full isn't injected again. `mem mcp` knows the current session from the latest `inject` call.
+   5. `get_topic(id)`: a topic id returns its description and all its facts. Records every fact it returns in `injections` for the current session, so a topic the agent has read in full isn't injected again. `mem mcp` knows the current session from the latest `inject` call.
    6. `delete_topic(id)`
    7. `delete_memory(id)`
    8. `update_topic(id, name?, description?, force?)`
    9. `create_memory(topic_id, content, force?)`
-   10. `inject(prompt, session_id)`: called by the harness on every user prompt, never by the agent (its description says so). Searches the prompt, applies items 2 and 3, records what it returns in `injected`, and returns readable text (not JSON), because the harness pastes the result into the context as is.
-   11. `clear_injected(session_id)`: called by the harness after a compaction. Deletes that session's `injected` rows, because compaction can drop earlier injections from the context while the session id stays the same.
-2. **When to inject:** the best match's cosine has to clear a minimum, and it has to be clearly ahead of the second best. Both numbers come from automatic tuning (section 6).
-3. **At most 5 entries.** Each is a matching fact plus its topic (id, name, description, fact count). Several facts from the same topic can each be an entry. Skip facts already in `injected` for this session.
+   10. `inject(prompt, session_id)`: called by the harness on every user prompt, never by the agent (its description says so). Searches the prompt, applies items 2 and 3, records what it returns in `injections`, and returns readable text (not JSON), because the harness pastes the result into the context as is.
+   11. `clear_injected(session_id)`: called by the harness after a compaction. Deletes that session's `injections` rows, because compaction can drop earlier injections from the context while the session id stays the same.
+2. **When to inject:** a fact gets injected only if it stands out from the noise for this prompt.
+   1. Score every fact against the prompt, and take the median of all those scores as the baseline. Most facts are unrelated to any given prompt, so the median shows what "unrelated" looks like this time. Already-shown facts count towards it too.
+   2. Drop the facts the agent has already seen in this session (item 3).
+   3. Inject the remaining facts whose cosine clears a minimum and sits at least a gap above the baseline. Both numbers come from automatic tuning (section 6).
+   4. Why a gap above the baseline: GTE scores even unrelated text fairly high, so a vague prompt ("ok, fix that") can score evenly against many facts, and a minimum alone would let one creep over by chance. Comparing against the baseline instead of the second best still lets two equally strong matches through.
+   5. With only a few facts, the median sits high and little gets through. That fixes itself as the store grows.
+3. **At most 5 entries,** best first. Each is a fact plus its topic (id, name, description, fact count). Several facts from the same topic can each be an entry.
+   1. Whatever the agent has seen isn't injected again in the same session. That means facts returned by `inject`, by `search`, and every fact of a topic read with `get_topic`. All three record them in `injections` and count as a retrieval for usage decay (`last_retrieved_at`, `hit_count`).
 4. **Tool descriptions are instructions for the agent:** write self-contained facts ("ob's PC budget is €2000", not "budget is 2000"), search before writing, and how to answer "did you mean".
 5. **`mem export`:** prints every topic and its facts as markdown to stdout, on demand. Read-only, never changes anything. Useful as a readable backup and to diff over time in git.
    1. Format, per topic, with topics sorted by name and facts by `created_at`:
