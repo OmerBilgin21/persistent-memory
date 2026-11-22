@@ -1,3 +1,5 @@
 *.db*
 mem
 gte-small/
+benchmark/gte-small
+benchmark/.venv/
