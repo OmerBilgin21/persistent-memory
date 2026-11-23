@@ -3,24 +3,30 @@ package domain
 import (
 	"context"
 	"fmt"
+	"slices"
+
 	"persistent-memory/internal/persistence"
 	"persistent-memory/util"
-	"slices"
 )
 
 type MemService struct {
 	embedService                     EmbedServiceInterface
 	store                            *persistence.Store
 	similarityAcceptedCountThreshold int
+	topMemoryCharacterCount          int
 }
 
-func NewMemService(store *persistence.Store, embedService *EmbedService,
+func NewMemService(
+	store *persistence.Store,
+	embedService *EmbedService,
 	acceptedCountThreshold int,
+	topMemoryCharacterCount int,
 ) (*MemService, error) {
 	return &MemService{
 		store:                            store,
 		embedService:                     embedService,
 		similarityAcceptedCountThreshold: acceptedCountThreshold,
+		topMemoryCharacterCount:          topMemoryCharacterCount,
 	}, nil
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+
 	"persistent-memory/internal/domain"
 	"persistent-memory/internal/persistence"
 
@@ -31,7 +32,7 @@ func main() {
 
 	store := persistence.NewStore(db)
 
-	_, err = domain.NewMemService(store, embedService, 5)
+	_, err = domain.NewMemService(store, embedService, 5, 280)
 	if err != nil {
 		panic(err)
 	}

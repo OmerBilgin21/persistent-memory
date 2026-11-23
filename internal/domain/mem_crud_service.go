@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"persistent-memory/internal/persistence"
 	"persistent-memory/util"
 
@@ -16,9 +17,9 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 		return nil, *err
 	}
 
-	if len(normalizedFact) > 280 {
+	if len(normalizedFact) > s.topMemoryCharacterCount {
 		return nil, RejectedMemoryUpsertResult{
-			Reason: "Fact can not be longer than 280 characters",
+			Reason: fmt.Sprint("Fact can not be longer than %v characters", s.topMemoryCharacterCount),
 		}
 	}
 
@@ -154,9 +155,9 @@ func (s *MemService) CreateOrRejectTopic(ctx context.Context, payload CreateTopi
 		return nil, *err
 	}
 
-	if len(normalizedName) > 280 {
+	if len(normalizedName) > s.topMemoryCharacterCount {
 		return nil, RejectedMemoryUpsertResult{
-			Reason: "Topic name can not be longer than 280 characters",
+			Reason: fmt.Sprint("Topic name can not be longer than %v characters", s.topMemoryCharacterCount),
 		}
 	}
 
@@ -388,9 +389,9 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 	if util.IsStrPtrNotEmpty(payload.Fact) {
 		normalizedFact = util.NormalizeStr(*payload.Fact)
 
-		if len(normalizedFact) > 280 {
+		if len(normalizedFact) > s.topMemoryCharacterCount {
 			return nil, RejectedMemoryUpsertResult{
-				Reason: "Fact can not be longer than 280 characters",
+				Reason: fmt.Sprint("Fact can not be longer than %v characters", s.topMemoryCharacterCount),
 			}
 		}
 
