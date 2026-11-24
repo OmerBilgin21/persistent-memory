@@ -10,23 +10,20 @@ import (
 )
 
 type MemService struct {
-	embedService                     EmbedServiceInterface
-	store                            *persistence.Store
-	similarityAcceptedCountThreshold int
-	topMemoryCharacterCount          int
+	embedService EmbedServiceInterface
+	store        *persistence.Store
+	tuned        TunedValues
 }
 
 func NewMemService(
 	store *persistence.Store,
-	embedService *EmbedService,
-	acceptedCountThreshold int,
-	topMemoryCharacterCount int,
+	embedService EmbedServiceInterface,
+	tuned TunedValues,
 ) (*MemService, error) {
 	return &MemService{
-		store:                            store,
-		embedService:                     embedService,
-		similarityAcceptedCountThreshold: acceptedCountThreshold,
-		topMemoryCharacterCount:          topMemoryCharacterCount,
+		store:        store,
+		embedService: embedService,
+		tuned:        tuned,
 	}, nil
 }
 
@@ -209,7 +206,7 @@ func (s *MemService) Search(
 		return 0
 	})
 
-	selectedMemories := (*cosineSorted)[:min(s.similarityAcceptedCountThreshold, len(*cosineSorted))]
+	selectedMemories := (*cosineSorted)[:min(s.tuned.AcceptedCountThreshold, len(*cosineSorted))]
 
 	var topicIds []uint
 	for _, m := range selectedMemories {

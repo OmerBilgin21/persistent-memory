@@ -17,9 +17,9 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 		return nil, *err
 	}
 
-	if len(normalizedFact) > s.topMemoryCharacterCount {
+	if len(normalizedFact) > s.tuned.TopMemoryCharacterCount {
 		return nil, RejectedMemoryUpsertResult{
-			Reason: fmt.Sprint("Fact can not be longer than %v characters", s.topMemoryCharacterCount),
+			Reason: fmt.Sprintf("Fact can not be longer than %v characters", s.tuned.TopMemoryCharacterCount),
 		}
 	}
 
@@ -50,7 +50,7 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 		topic, err := repos.Topics.Get(ctx, payload.TopicId)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				selectedMemories := (*cosineSortedMemories)[:min(s.similarityAcceptedCountThreshold, len(*cosineSortedMemories))]
+				selectedMemories := (*cosineSortedMemories)[:min(s.tuned.AcceptedCountThreshold, len(*cosineSortedMemories))]
 				topTopics, err := getTopicsOfMemories(ctx, selectedMemories, repos)
 				if err != nil {
 					return RejectedMemoryUpsertResult{
@@ -79,7 +79,7 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 		var similarMemories []SimilarityMemory
 
 		for _, r := range *cosineSortedMemories {
-			if r.CosineRank >= InsertMemoryThreshold {
+			if r.CosineRank >= s.tuned.InsertMemoryThreshold {
 				similarMemories = append(similarMemories, r)
 			}
 		}
@@ -121,7 +121,7 @@ func (s *MemService) CreateOrRejectMemory(ctx context.Context, payload CreateMem
 			*cosineSortedMemories,
 			repos,
 			true,
-			RejectionThresholdPercentage,
+			s.tuned.RejectionThresholdPercentage,
 			nil,
 			payload.Force,
 		)
@@ -155,9 +155,9 @@ func (s *MemService) CreateOrRejectTopic(ctx context.Context, payload CreateTopi
 		return nil, *err
 	}
 
-	if len(normalizedName) > s.topMemoryCharacterCount {
+	if len(normalizedName) > s.tuned.TopMemoryCharacterCount {
 		return nil, RejectedMemoryUpsertResult{
-			Reason: fmt.Sprint("Topic name can not be longer than %v characters", s.topMemoryCharacterCount),
+			Reason: fmt.Sprintf("Topic name can not be longer than %v characters", s.tuned.TopMemoryCharacterCount),
 		}
 	}
 
@@ -216,7 +216,7 @@ func (s *MemService) CreateOrRejectTopic(ctx context.Context, payload CreateTopi
 		var similarTopics []SimilarityTopic
 
 		for _, r := range *cosineSortedTopics {
-			if r.CosineRank >= InsertTopicThreshold {
+			if r.CosineRank >= s.tuned.InsertTopicThreshold {
 				similarTopics = append(similarTopics, r)
 			}
 		}
@@ -321,7 +321,7 @@ func (s *MemService) UpdateTopic(ctx context.Context, payload UpdateTopic) (*Sim
 				var similarTopics []SimilarityTopic
 
 				for _, r := range *cosineSortedTopics {
-					if r.Id != payload.TopicId && r.CosineRank >= InsertTopicThreshold {
+					if r.Id != payload.TopicId && r.CosineRank >= s.tuned.InsertTopicThreshold {
 						similarTopics = append(similarTopics, r)
 					}
 				}
@@ -389,9 +389,9 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 	if util.IsStrPtrNotEmpty(payload.Fact) {
 		normalizedFact = util.NormalizeStr(*payload.Fact)
 
-		if len(normalizedFact) > s.topMemoryCharacterCount {
+		if len(normalizedFact) > s.tuned.TopMemoryCharacterCount {
 			return nil, RejectedMemoryUpsertResult{
-				Reason: fmt.Sprint("Fact can not be longer than %v characters", s.topMemoryCharacterCount),
+				Reason: fmt.Sprintf("Fact can not be longer than %v characters", s.tuned.TopMemoryCharacterCount),
 			}
 		}
 
@@ -472,7 +472,7 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 				var similarMemories []SimilarityMemory
 
 				for _, r := range *cosineSortedMemories {
-					if r.Id != payload.MemoryId && r.CosineRank >= InsertMemoryThreshold {
+					if r.Id != payload.MemoryId && r.CosineRank >= s.tuned.InsertMemoryThreshold {
 						similarMemories = append(similarMemories, r)
 					}
 				}
@@ -520,7 +520,7 @@ func (s *MemService) UpdateMemory(ctx context.Context, payload UpdateMemory) (*S
 			*cosineSortedMemories,
 			repos,
 			false,
-			RejectionThresholdPercentage,
+			s.tuned.RejectionThresholdPercentage,
 			&SimilarityMemory{
 				Content: existingMemory.Content,
 				Id:      existingMemory.Id,

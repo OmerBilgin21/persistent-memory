@@ -92,7 +92,7 @@ func (s *MemService) Inject(ctx context.Context, prompt, sessionId string) Simil
 			continue
 		}
 
-		if len(toBeInjected) >= MemoryRetrievalLimit || m.CosineRank < MemoryInjectionThreshold || m.CosineRank < medianValue+medianValue*MemoryInjectionSuperiorityPercentage {
+		if len(toBeInjected) >= s.tuned.MemoryRetrievalLimit || m.CosineRank < s.tuned.MemoryInjectionThreshold || m.CosineRank < medianValue+medianValue*s.tuned.MemoryInjectionSuperiorityPercentage {
 			break
 		}
 

@@ -32,7 +32,12 @@ func main() {
 
 	store := persistence.NewStore(db)
 
-	_, err = domain.NewMemService(store, embedService, 5, 280)
+	tuned, err := domain.LoadTunedValues()
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = domain.NewMemService(store, embedService, tuned)
 	if err != nil {
 		panic(err)
 	}
