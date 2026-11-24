@@ -197,6 +197,7 @@ func (s *MemService) CreateOrRejectTopic(ctx context.Context, payload CreateTopi
 			}
 
 			createdId = tcreatedId
+			return nil
 		}
 
 		topics, err := repos.Topics.GetAll(ctx)
