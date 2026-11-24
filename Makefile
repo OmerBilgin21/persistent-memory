@@ -33,6 +33,11 @@ setup_benchmark:
 	cd benchmark && .venv/bin/python tester.py
 	@echo ""
 
+tune:
+	@test -e "$(MODEL_DIR)/model.safetensors" || { echo "model not found in $(MODEL_DIR), run make setup_benchmark first"; exit 1; }
+	gte_small_directory="$(MODEL_DIR)" go run ./tuner
+	@echo ""
+
 run_benchmark:
 	@test -e benchmark/.venv -a -e benchmark/gte-small || { echo "run make setup_benchmark first"; exit 1; }
 	@echo "generating reference vectors..."
