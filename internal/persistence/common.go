@@ -88,9 +88,7 @@ func (r *baseRepository[t]) Create(ctx context.Context, entity *t) error {
 func (r *baseRepository[t]) Get(ctx context.Context, id uint) (*t, error) {
 	var result t
 
-	err := r.db.WithContext(ctx).First(&result, map[string]uint{
-		"id": id,
-	}).Error
+	err := r.db.WithContext(ctx).First(&result, map[string]any{"id": id}).Error
 	if err != nil {
 		return nil, err
 	}
