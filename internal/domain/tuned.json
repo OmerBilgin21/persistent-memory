@@ -1,0 +1,10 @@
+{
+  "insert_memory_threshold": 0.904,
+  "insert_topic_threshold": 0.891,
+  "rejection_threshold_percentage": 0.044,
+  "memory_injection_threshold": 0.855,
+  "memory_injection_superiority_percentage": 0.125,
+  "accepted_count_threshold": 5,
+  "top_memory_character_count": 280,
+  "memory_retrieval_limit": 5
+}
