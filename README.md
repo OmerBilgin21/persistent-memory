@@ -154,9 +154,8 @@ Four tools, two shared checks.
       ```
 
 6. **`mem tidy`:** the daily pass. In v1 it's pure code:
-   1. Usage decay: a few if statements with threshold values ob picks by hand. They look at how long since a fact or topic was last retrieved (last_retrieved_at) and how many times it was retrieved (hit_count). Never at how old something is, and never tuned automatically. Facts that decay marks as obsolete are hard-deleted.
+   1. Usage decay: a few if statements with threshold values ob picks by hand, kept in the same embedded JSON file as the tuned values (section 6). They look at how long since a fact or topic was last retrieved (last_retrieved_at) and how many times it was retrieved (hit_count). Never at how old something is, and never tuned automatically. Facts that decay marks as obsolete are hard-deleted.
    2. Topics left with no facts are deleted.
-   3. Topics over the fact cap are listed.
 7. **Claude Code notes** (the wiring itself lives outside `mem`, per ground rule 3):
    1. A UserPromptSubmit hook of type `mcp_tool` calls `inject` with `{"prompt": "${prompt}", "session_id": "${session_id}"}`. The tool's text output is added to the context next to the prompt. The default timeout on UserPromptSubmit is 30 seconds, and a timeout or failure lets the prompt through without injection.
    2. A SessionStart hook with matcher `compact` calls `clear_injected` with `{"session_id": "${session_id}"}`.
