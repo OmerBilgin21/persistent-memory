@@ -26,11 +26,13 @@ type TopicsRepositoryInterface interface {
 	Create(ctx context.Context, entity *Topic) error
 	Update(ctx context.Context, entity *Topic) error
 	Delete(ctx context.Context, id uint) error
+	BulkDelete(ctx context.Context, ids []uint) error
 	GetAll(ctx context.Context) (*[]Topic, error)
 	GetByName(ctx context.Context, name string) (*Topic, error)
 	UpdateHitCountAndLRA(ctx context.Context, ids []uint) error
 	GetByIds(ctx context.Context, ids []uint) (*[]Topic, error)
 	GetWithMemories(ctx context.Context, id uint) (*Topic, error)
+	GetTopicsWithoutMemories(ctx context.Context) (*[]Topic, error)
 }
 
 func NewTopicsRepository(db *gorm.DB) *TopicsRepository {
@@ -71,9 +73,28 @@ func (r *TopicsRepository) UpdateHitCountAndLRA(ctx context.Context, ids []uint)
 
 func (r *TopicsRepository) GetWithMemories(ctx context.Context, id uint) (*Topic, error) {
 	var found Topic
-	err := r.db.WithContext(ctx).Model(&Topic{}).Preload("Memories").First(&found, map[string]uint{
+	err := r.db.WithContext(ctx).Model(&Topic{}).Preload("Memories").First(&found, map[string]any{
 		"id": id,
 	}).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &found, nil
+}
+
+func (r *TopicsRepository) GetTopicsWithoutMemories(ctx context.Context) (*[]Topic, error) {
+	var found []Topic
+	err := r.db.WithContext(ctx).Raw(`
+with
+	topics_with_memory as (
+			select distinct topic_id
+			from memories
+	)
+select *
+from topics
+where id not in (select topic_id from topics_with_memory)
+		`).Find(&found).Error
 	if err != nil {
 		return nil, err
 	}

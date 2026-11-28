@@ -3,9 +3,10 @@ package persistence
 import (
 	"context"
 	"fmt"
-	"persistent-memory/util"
 	"strings"
 	"time"
+
+	"persistent-memory/util"
 
 	"gorm.io/gorm"
 )
@@ -28,6 +29,7 @@ type MemoriesRepositoryInterface interface {
 	Create(ctx context.Context, entity *Memory) error
 	Update(ctx context.Context, entity *Memory) error
 	Delete(ctx context.Context, id uint) error
+	BulkDelete(ctx context.Context, ids []uint) error
 	GetAll(ctx context.Context) (*[]Memory, error)
 	UpdateHitCountAndLRA(ctx context.Context, ids []uint) error
 	GetAllByBM25Desc(ctx context.Context, searchQuery string) (*[]Memory, error)

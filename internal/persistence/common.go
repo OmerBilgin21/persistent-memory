@@ -104,6 +104,10 @@ func (r *baseRepository[t]) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(new(t), id).Error
 }
 
+func (r *baseRepository[t]) BulkDelete(ctx context.Context, ids []uint) error {
+	return r.db.WithContext(ctx).Where("id IN ?", ids).Delete(new(t)).Error
+}
+
 func (r *baseRepository[t]) GetAll(ctx context.Context) (*[]t, error) {
 	var results []t
 	err := r.db.WithContext(ctx).Find(&results).Error

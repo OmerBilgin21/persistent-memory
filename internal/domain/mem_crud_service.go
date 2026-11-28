@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"persistent-memory/internal/persistence"
 	"persistent-memory/util"
@@ -605,8 +606,66 @@ func (s *MemService) GetTopicWithMemories(ctx context.Context, id uint, sessionI
 }
 
 func (s *MemService) decay(ctx context.Context) error {
-	// TODO: stub, implement
-	return nil
+	res := s.withTransaction(ctx, func(repos *persistence.Store) Result {
+		memories, err := repos.Memories.GetAll(ctx)
+		if err != nil {
+			return UnexpectedErrorResult{
+				Err: err,
+			}
+		}
+
+		var memoryErr error
+		if len(*memories) > 0 {
+			var toBeDeletedMemIds []uint
+			for _, m := range *memories {
+				if time.Duration(time.Since(m.LastRetrievedAt)).Hours() > float64(24*s.tuned.DecayAfterDays) && m.HitCount < s.tuned.DecayBelowHitCount {
+					toBeDeletedMemIds = append(toBeDeletedMemIds, m.Id)
+				}
+			}
+
+			memoryErr = repos.Memories.BulkDelete(ctx, toBeDeletedMemIds)
+		}
+
+		topics, err := repos.Topics.GetTopicsWithoutMemories(ctx)
+		if err != nil {
+			return UnexpectedErrorResult{
+				Err: err,
+			}
+		}
+
+		var topicErr error
+		if len(*topics) > 0 {
+			var toBeDeletedTopicsIds []uint
+			for _, t := range *topics {
+				toBeDeletedTopicsIds = append(toBeDeletedTopicsIds, t.Id)
+			}
+
+			topicErr = repos.Topics.BulkDelete(ctx, toBeDeletedTopicsIds)
+		}
+
+		if memoryErr != nil {
+			return UnexpectedErrorResult{
+				Err: fmt.Errorf("error while deleting one of the decayed memories: %w", memoryErr),
+			}
+		}
+
+		if topicErr != nil {
+			return UnexpectedErrorResult{
+				Err: topicErr,
+			}
+		}
+
+		return nil
+	})
+
+	switch r := res.(type) {
+	case UnexpectedErrorResult:
+		return r.Err
+	case RejectedMemoryUpsertResult:
+		return errors.New(r.Reason)
+	default:
+		return nil
+	}
 }
 
 func (s *MemService) Export(ctx context.Context) error {
@@ -615,7 +674,7 @@ func (s *MemService) Export(ctx context.Context) error {
 }
 
 func (s *MemService) Tidy(ctx context.Context) error {
-	s.decay(ctx)
-	// TODO: stub, implement
-	return nil
+	// this is just calling decay for now but I made it a two fold call
+	// just in case I wanna implement something else to it in the future
+	return s.decay(ctx)
 }
