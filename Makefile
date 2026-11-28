@@ -15,6 +15,9 @@ check: build
 	@echo "mod tidy..."
 	@go mod tidy
 	@echo ""
+	@echo "Vetting..."
+	@go vet ./...
+	@echo ""
 	@echo "running tests..."
 	@go test -v -count=1 ./...
 
