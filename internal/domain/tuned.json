@@ -6,5 +6,7 @@
   "memory_injection_superiority_percentage": 0.125,
   "accepted_count_threshold": 5,
   "top_memory_character_count": 280,
-  "memory_retrieval_limit": 5
+  "memory_retrieval_limit": 5,
+  "decay_after_days": 90,
+  "decay_below_hit_count": 3
 }

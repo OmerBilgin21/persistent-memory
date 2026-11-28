@@ -21,6 +21,8 @@ type TunedValues struct {
 	AcceptedCountThreshold               int     `json:"accepted_count_threshold"`
 	TopMemoryCharacterCount              int     `json:"top_memory_character_count"`
 	MemoryRetrievalLimit                 int     `json:"memory_retrieval_limit"`
+	DecayAfterDays                       int     `json:"decay_after_days"`
+	DecayBelowHitCount                   int     `json:"decay_below_hit_count"`
 }
 
 type rawTunedValues struct {
@@ -32,6 +34,8 @@ type rawTunedValues struct {
 	AcceptedCountThreshold               *int     `json:"accepted_count_threshold"`
 	TopMemoryCharacterCount              *int     `json:"top_memory_character_count"`
 	MemoryRetrievalLimit                 *int     `json:"memory_retrieval_limit"`
+	DecayAfterDays                       *int     `json:"decay_after_days"`
+	DecayBelowHitCount                   *int     `json:"decay_below_hit_count"`
 }
 
 func LoadTunedValues() (TunedValues, error) {
@@ -59,6 +63,8 @@ func ParseTunedValues(data []byte) (TunedValues, error) {
 		{"accepted_count_threshold", raw.AcceptedCountThreshold != nil},
 		{"top_memory_character_count", raw.TopMemoryCharacterCount != nil},
 		{"memory_retrieval_limit", raw.MemoryRetrievalLimit != nil},
+		{"decay_after_days", raw.DecayAfterDays != nil},
+		{"decay_below_hit_count", raw.DecayBelowHitCount != nil},
 	}
 
 	var missing []string
@@ -81,6 +87,8 @@ func ParseTunedValues(data []byte) (TunedValues, error) {
 		AcceptedCountThreshold:               *raw.AcceptedCountThreshold,
 		TopMemoryCharacterCount:              *raw.TopMemoryCharacterCount,
 		MemoryRetrievalLimit:                 *raw.MemoryRetrievalLimit,
+		DecayAfterDays:                       *raw.DecayAfterDays,
+		DecayBelowHitCount:                   *raw.DecayBelowHitCount,
 	}
 
 	if err := values.validate(); err != nil {
@@ -127,6 +135,8 @@ func (v TunedValues) validate() error {
 		{"accepted_count_threshold", v.AcceptedCountThreshold},
 		{"top_memory_character_count", v.TopMemoryCharacterCount},
 		{"memory_retrieval_limit", v.MemoryRetrievalLimit},
+		{"decay_after_days", v.DecayAfterDays},
+		{"decay_below_hit_count", v.DecayBelowHitCount},
 	}
 	for _, c := range counts {
 		if c.value <= 0 {

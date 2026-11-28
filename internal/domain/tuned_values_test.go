@@ -27,7 +27,9 @@ func TestParseTunedValues(test *testing.T) {
 		"memory_injection_superiority_percentage": 0.08,
 		"accepted_count_threshold": 5,
 		"top_memory_character_count": 280,
-		"memory_retrieval_limit": 5
+		"memory_retrieval_limit": 5,
+		"decay_after_days": 90,
+		"decay_below_hit_count": 3
 	}`
 
 	test.Run("valid values parse, including a legitimate 0", func(t *testing.T) {
@@ -50,12 +52,12 @@ func TestParseTunedValues(test *testing.T) {
 	}{
 		{
 			name:          "a missing key fails and is named",
-			data:          strings.Replace(valid, `"memory_retrieval_limit": 5`, `"accepted_count_threshold": 5`, 1),
+			data:          strings.Replace(valid, `"memory_retrieval_limit": 5,`, `"accepted_count_threshold": 5,`, 1),
 			expectedInErr: "memory_retrieval_limit",
 		},
 		{
 			name:          "an unknown key fails",
-			data:          strings.Replace(valid, `"memory_retrieval_limit": 5`, `"memory_retrieval_limit": 5, "typo_threshold": 1`, 1),
+			data:          strings.Replace(valid, `"memory_retrieval_limit": 5,`, `"memory_retrieval_limit": 5, "typo_threshold": 1,`, 1),
 			expectedInErr: "typo_threshold",
 		},
 		{
