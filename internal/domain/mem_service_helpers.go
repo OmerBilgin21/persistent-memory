@@ -88,7 +88,7 @@ func checkForMemoryTopicFitAndSuggest(
 	cosineSortedMemories []SimilarityMemory,
 	store *persistence.Store,
 	createMode bool,
-	// between 0-1 represantation
+	// between 0-1 representation
 	rejectionThresholdPercentage float32,
 	existingMemory *SimilarityMemory,
 	force bool,
