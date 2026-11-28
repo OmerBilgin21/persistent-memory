@@ -4,5 +4,3 @@ gte-small/
 benchmark/gte-small
 benchmark/.venv/
 tuner/examples.json
-tuner/examples.starter.json
-tuner/prompts.json
