@@ -3,10 +3,9 @@ package persistence
 import (
 	"context"
 	"fmt"
+	"persistent-memory/util"
 	"strings"
 	"time"
-
-	"persistent-memory/util"
 
 	"gorm.io/gorm"
 )
