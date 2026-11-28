@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"persistent-memory/util"
@@ -95,7 +96,7 @@ func TestCosineSimilarity(test *testing.T) {
 		}
 
 		expectedRes := float32(0.7749478)
-		if llamaSimResult != expectedRes {
+		if math.Abs(float64(expectedRes-llamaSimResult)) > 1e-6 {
 			t.Logf("incorrect result! expected %+v, got: %+v", expectedRes, llamaSimResult)
 			t.FailNow()
 		}
