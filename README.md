@@ -167,7 +167,7 @@ Four tools, two shared checks.
 
 1. **Log every query** in `events` from day one.
 2. **Tuning** comes from a tool that is run by hand, like the benchmark. It never runs on start:
-   1. An example set written by ob and kept in the repo, with the correct answer for every example:
+   1. An example set written by ob, with the correct answer for every example. It's built from ob's own notes and prompts, so it stays local and gitignored (`tuner/examples.json`):
       1. Duplicate, near duplicate, related and unrelated fact pairs, plus a few negation pairs. These tune the duplicate thresholds and the consolidation grouping threshold.
       2. Facts with prompts, and whether each prompt should inject them. These tune the injection minimum and gap.
       3. Facts and topics with queries and the results each should return. These tune search, topic resolution and the "did you mean" cutoff.
@@ -175,6 +175,7 @@ Four tools, two shared checks.
    3. The binary embeds that file (`go:embed`) and reads it once on start. A file that doesn't parse stops the start, and a test parses it so that's caught before shipping.
    4. Keep the number of tuned values small compared to the number of examples, and check the result on a part of the set that tuning didn't see. Otherwise the numbers just memorize the examples and fail on real data.
    5. The tool has integration tests of its own.
+   6. `make tune` runs it. `go run ./tuner -diagnose` (with `gte_small_directory` set) prints each inject prompt's injected, missed and wrong facts at the current values, plus the silence rate, to review labels and results.
 3. **Test queries,** for you during development: about 30 queries with their expected results. Run them after every ranking change so you notice when something gets worse.
 
 ## v2: continuous refinement
